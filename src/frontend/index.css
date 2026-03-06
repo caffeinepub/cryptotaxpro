@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────
+   Font Faces — Self-hosted from /assets/fonts/
+   ────────────────────────────────────────────── */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/assets/fonts/GeistMono[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Sora";
+  src: url("/assets/fonts/Sora[wght].woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cabinet Grotesk";
+  src: url("/assets/fonts/CabinetGrotesk[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ──────────────────────────────────────────────
+   CryptoTaxPro — Dark Bloomberg Terminal Theme
+   Teal/Cyan primary accent, deep dark backgrounds
+   ────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --radius: 0.5rem;
+
+    /* Dark theme is the primary theme */
+    --background: 0.12 0.008 240;
+    --foreground: 0.92 0.01 200;
+
+    --card: 0.16 0.01 240;
+    --card-foreground: 0.92 0.01 200;
+
+    --popover: 0.18 0.012 240;
+    --popover-foreground: 0.92 0.01 200;
+
+    /* Teal/Cyan primary */
+    --primary: 0.72 0.16 195;
+    --primary-foreground: 0.1 0.008 240;
+
+    --secondary: 0.2 0.012 240;
+    --secondary-foreground: 0.85 0.01 200;
+
+    --muted: 0.2 0.01 240;
+    --muted-foreground: 0.55 0.02 210;
+
+    --accent: 0.72 0.16 195;
+    --accent-foreground: 0.1 0.008 240;
+
+    --destructive: 0.65 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+
+    --border: 0.28 0.018 240;
+    --input: 0.22 0.015 240;
+    --ring: 0.72 0.16 195;
+
+    /* Chart palette — teal family + accents */
+    --chart-1: 0.72 0.16 195;
+    --chart-2: 0.65 0.18 155;
+    --chart-3: 0.58 0.2 285;
+    --chart-4: 0.75 0.18 85;
+    --chart-5: 0.68 0.22 340;
+
+    /* Sidebar — slightly lighter than page */
+    --sidebar: 0.145 0.01 240;
+    --sidebar-foreground: 0.88 0.01 200;
+    --sidebar-primary: 0.72 0.16 195;
+    --sidebar-primary-foreground: 0.1 0.008 240;
+    --sidebar-accent: 0.22 0.015 240;
+    --sidebar-accent-foreground: 0.88 0.01 200;
+    --sidebar-border: 0.24 0.015 240;
+    --sidebar-ring: 0.72 0.16 195;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Sora", "Cabinet Grotesk", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: oklch(0.14 0.008 240);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.3 0.015 240);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.4 0.02 210);
+  }
+}
+
+/* ──────────────────────────────────────────────
+   Utility classes for gain/loss coloring
+   ────────────────────────────────────────────── */
+@layer utilities {
+  .text-gain {
+    color: oklch(0.72 0.18 142);
+  }
+  .text-loss {
+    color: oklch(0.62 0.22 25);
+  }
+  .bg-gain-subtle {
+    background-color: oklch(0.72 0.18 142 / 0.1);
+  }
+  .bg-loss-subtle {
+    background-color: oklch(0.62 0.22 25 / 0.1);
+  }
+
+  /* Glow effects for primary accent */
+  .glow-primary {
+    box-shadow: 0 0 20px oklch(0.72 0.16 195 / 0.3);
+  }
+
+  /* Data table row hover */
+  .table-row-hover:hover {
+    background-color: oklch(0.2 0.012 240);
+    cursor: pointer;
+  }
+
+  /* Glass card effect */
+  .glass-card {
+    background: oklch(0.18 0.012 240 / 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid oklch(0.3 0.018 240 / 0.5);
+  }
+
+  /* Terminal-style mono text */
+  .mono {
+    font-family: "Geist Mono", "JetBrains Mono", monospace;
+    font-size: 0.85em;
+    letter-spacing: -0.02em;
+  }
+}
