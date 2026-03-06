@@ -1,13 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+
 import {
   Select,
   SelectContent,
@@ -27,11 +20,9 @@ import {
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
-  CheckCircle2,
   DollarSign,
   Download,
   FileText,
-  Lock,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -41,52 +32,19 @@ import { StatCard } from "../components/StatCard";
 import {
   useTaxSummary,
   useTransactions,
-  useUpgradePlan,
   useUserProfile,
 } from "../hooks/useQueries";
 import { formatCurrency, formatDate } from "../utils/format";
 
-const PLAN_OPTIONS = [
-  {
-    id: "newbie",
-    name: "Newbie",
-    price: "$49",
-    limit: "Up to 100 transactions",
-    color: "border-blue-500/40 hover:border-blue-500/70",
-    badge: "",
-  },
-  {
-    id: "hodler",
-    name: "Hodler",
-    price: "$99",
-    limit: "Up to 1,000 transactions",
-    color: "border-primary/50 hover:border-primary/80",
-    badge: "Most Popular",
-  },
-  {
-    id: "trader",
-    name: "Trader",
-    price: "$179",
-    limit: "Up to 10,000 transactions",
-    color: "border-yellow-500/40 hover:border-yellow-500/70",
-    badge: "",
-  },
-];
-
 export function TaxReports() {
   const [taxYear, setTaxYear] = useState("2025");
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState("hodler");
-  const [upgradeSuccess, setUpgradeSuccess] = useState(false);
 
   const { data: taxSummary, isLoading: summaryLoading } = useTaxSummary(
     BigInt(Number(taxYear)),
   );
   const { data: transactions, isLoading: txLoading } = useTransactions();
   const { data: profile } = useUserProfile();
-  const upgradeMutation = useUpgradePlan();
 
-  const isPaid = profile?.plan !== "free";
   const method = profile?.costBasisMethod ?? "FIFO";
 
   // Form 8949 data — trade transactions
@@ -97,26 +55,199 @@ export function TaxReports() {
     )
     .slice(0, 10);
 
-  async function handleDownload(reportName: string) {
-    if (!isPaid) {
-      setUpgradeOpen(true);
-      return;
-    }
-    toast.success(`Downloading ${reportName}...`);
+  function triggerDownload(
+    content: string,
+    filename: string,
+    mimeType: string,
+  ) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
-  async function handleUpgrade() {
-    try {
-      await upgradeMutation.mutateAsync(selectedPlan);
-      setUpgradeSuccess(true);
-      setTimeout(() => {
-        setUpgradeOpen(false);
-        setUpgradeSuccess(false);
-        toast.success(`Upgraded to ${selectedPlan} plan!`);
-      }, 1500);
-    } catch {
-      toast.error("Upgrade failed");
+  function escapeCsvField(value: string | number): string {
+    const str = String(value);
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
     }
+    return str;
+  }
+
+  function handleDownload(reportName: string) {
+    const txs = transactions ?? [];
+    const yearTxs = txs.filter((tx) => tx.date.startsWith(taxYear));
+
+    if (reportName === "Form 8949 (PDF)") {
+      // Generate Form 8949 CSV
+      const disposalTxs = yearTxs.filter(
+        (tx) =>
+          tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+      );
+      const rows = [
+        [
+          "Description/Asset",
+          "Date Acquired",
+          "Date Sold",
+          "Proceeds (USD)",
+          "Cost Basis (USD)",
+          "Gain/Loss (USD)",
+          "Term",
+        ].join(","),
+        ...disposalTxs.map((tx) =>
+          [
+            escapeCsvField(`${tx.asset} (${tx.amount} units)`),
+            escapeCsvField("Various"),
+            escapeCsvField(tx.date),
+            escapeCsvField((tx.priceUSD * tx.amount).toFixed(2)),
+            escapeCsvField((tx.costBasisUSD * tx.amount).toFixed(2)),
+            escapeCsvField(tx.gainLossUSD.toFixed(2)),
+            escapeCsvField(tx.isShortTerm ? "Short-Term" : "Long-Term"),
+          ].join(","),
+        ),
+      ];
+      triggerDownload(rows.join("\n"), `form8949_${taxYear}.csv`, "text/csv");
+    } else if (reportName === "Schedule D") {
+      // Generate Schedule D summary CSV
+      const rows = [
+        [
+          "Category",
+          "Proceeds (USD)",
+          "Cost Basis (USD)",
+          "Gain/Loss (USD)",
+        ].join(","),
+        [
+          escapeCsvField("Short-Term (Box A/B)"),
+          escapeCsvField(
+            (
+              (taxSummary?.shortTermGains ?? 0) +
+              Math.abs(taxSummary?.losses ?? 0)
+            ).toFixed(2),
+          ),
+          escapeCsvField((taxSummary?.shortTermGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.shortTermGains ?? 0).toFixed(2)),
+        ].join(","),
+        [
+          escapeCsvField("Long-Term (Box D/E)"),
+          escapeCsvField((taxSummary?.longTermGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.longTermGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.longTermGains ?? 0).toFixed(2)),
+        ].join(","),
+        [
+          escapeCsvField("Net Capital Gain/Loss"),
+          "",
+          "",
+          escapeCsvField((taxSummary?.netGains ?? 0).toFixed(2)),
+        ].join(","),
+      ];
+      triggerDownload(rows.join("\n"), `scheduleD_${taxYear}.csv`, "text/csv");
+    } else if (reportName === "TurboTax Export") {
+      // Generate TurboTax-compatible CSV
+      const disposalTxs = yearTxs.filter(
+        (tx) =>
+          tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+      );
+      const rows = [
+        [
+          "Currency Name",
+          "Purchase Date",
+          "Cost Basis",
+          "Date Sold",
+          "Proceeds",
+        ].join(","),
+        ...disposalTxs.map((tx) =>
+          [
+            escapeCsvField(tx.asset),
+            escapeCsvField("Various"),
+            escapeCsvField((tx.costBasisUSD * tx.amount).toFixed(2)),
+            escapeCsvField(tx.date),
+            escapeCsvField((tx.priceUSD * tx.amount).toFixed(2)),
+          ].join(","),
+        ),
+      ];
+      triggerDownload(rows.join("\n"), `turbotax_${taxYear}.csv`, "text/csv");
+    } else if (reportName === "CSV Export") {
+      // Full transaction export
+      const rows = [
+        [
+          "ID",
+          "Date",
+          "Type",
+          "Asset",
+          "Amount",
+          "Price (USD)",
+          "Value (USD)",
+          "Cost Basis (USD)",
+          "Gain/Loss (USD)",
+          "Short Term",
+          "Exchange",
+          "Tags",
+          "Notes",
+        ].join(","),
+        ...txs.map((tx) =>
+          [
+            escapeCsvField(tx.id.toString()),
+            escapeCsvField(tx.date),
+            escapeCsvField(tx.txType),
+            escapeCsvField(tx.asset),
+            escapeCsvField(tx.amount.toString()),
+            escapeCsvField(tx.priceUSD.toFixed(2)),
+            escapeCsvField((tx.priceUSD * tx.amount).toFixed(2)),
+            escapeCsvField(tx.costBasisUSD.toFixed(2)),
+            escapeCsvField(tx.gainLossUSD.toFixed(2)),
+            escapeCsvField(tx.isShortTerm ? "Yes" : "No"),
+            escapeCsvField(tx.exchange),
+            escapeCsvField(tx.tags.join("; ")),
+            escapeCsvField(tx.notes),
+          ].join(","),
+        ),
+      ];
+      triggerDownload(
+        rows.join("\n"),
+        `transactions_${taxYear}.csv`,
+        "text/csv",
+      );
+    } else {
+      // International reports — gains/losses summary
+      const countryMap: Record<string, string> = {
+        "UK HMRC": "uk_hmrc",
+        "Canada T1135": "canada_t1135",
+        "Australia CGT": "australia_cgt",
+        "Germany Anlage SO": "germany_anlageso",
+      };
+      const slug =
+        countryMap[reportName] ?? reportName.toLowerCase().replace(/\s+/g, "_");
+      const rows = [
+        [
+          "Report",
+          "Tax Year",
+          "Short-Term Gains (USD)",
+          "Long-Term Gains (USD)",
+          "Income (USD)",
+          "Losses (USD)",
+          "Net Gains (USD)",
+          "Estimated Tax (USD)",
+        ].join(","),
+        [
+          escapeCsvField(reportName),
+          escapeCsvField(taxYear),
+          escapeCsvField((taxSummary?.shortTermGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.longTermGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.income ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.losses ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.netGains ?? 0).toFixed(2)),
+          escapeCsvField((taxSummary?.estimatedTax ?? 0).toFixed(2)),
+        ].join(","),
+      ];
+      triggerDownload(rows.join("\n"), `${slug}_${taxYear}.csv`, "text/csv");
+    }
+
+    toast.success(`Downloaded ${reportName}`);
   }
 
   return (
@@ -213,28 +344,14 @@ export function TaxReports() {
           <h2 className="text-sm font-semibold text-foreground">
             Download Reports
           </h2>
-          {!isPaid && (
-            <Badge
-              variant="outline"
-              className="ml-2 border-yellow-500/40 text-yellow-500 bg-yellow-500/10 text-xs"
-            >
-              <Lock className="w-3 h-3 mr-1" /> Paid Plan Required
-            </Badge>
-          )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Button
             data-ocid="reports.download_8949.button"
             variant="outline"
-            className={cn(
-              "flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative",
-              !isPaid && "opacity-75",
-            )}
+            className="flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative"
             onClick={() => handleDownload("Form 8949 (PDF)")}
           >
-            {!isPaid && (
-              <Lock className="absolute top-2 right-2 w-3 h-3 text-yellow-500" />
-            )}
             <Download className="w-5 h-5 text-primary" />
             <div className="text-center">
               <p className="text-xs font-semibold">Form 8949</p>
@@ -244,15 +361,9 @@ export function TaxReports() {
           <Button
             data-ocid="reports.download_scheduled.button"
             variant="outline"
-            className={cn(
-              "flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative",
-              !isPaid && "opacity-75",
-            )}
+            className="flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative"
             onClick={() => handleDownload("Schedule D")}
           >
-            {!isPaid && (
-              <Lock className="absolute top-2 right-2 w-3 h-3 text-yellow-500" />
-            )}
             <Download className="w-5 h-5 text-primary" />
             <div className="text-center">
               <p className="text-xs font-semibold">Schedule D</p>
@@ -262,15 +373,9 @@ export function TaxReports() {
           <Button
             data-ocid="reports.export_turbotax.button"
             variant="outline"
-            className={cn(
-              "flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative",
-              !isPaid && "opacity-75",
-            )}
+            className="flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative"
             onClick={() => handleDownload("TurboTax Export")}
           >
-            {!isPaid && (
-              <Lock className="absolute top-2 right-2 w-3 h-3 text-yellow-500" />
-            )}
             <Download className="w-5 h-5 text-primary" />
             <div className="text-center">
               <p className="text-xs font-semibold">TurboTax</p>
@@ -280,15 +385,9 @@ export function TaxReports() {
           <Button
             data-ocid="reports.export_csv.button"
             variant="outline"
-            className={cn(
-              "flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative",
-              !isPaid && "opacity-75",
-            )}
+            className="flex flex-col items-center gap-2 h-auto py-4 border-border text-foreground hover:bg-secondary relative"
             onClick={() => handleDownload("CSV Export")}
           >
-            {!isPaid && (
-              <Lock className="absolute top-2 right-2 w-3 h-3 text-yellow-500" />
-            )}
             <Download className="w-5 h-5 text-primary" />
             <div className="text-center">
               <p className="text-xs font-semibold">Export CSV</p>
@@ -296,18 +395,6 @@ export function TaxReports() {
             </div>
           </Button>
         </div>
-        {!isPaid && (
-          <p className="text-xs text-muted-foreground mt-3">
-            <Button
-              variant="link"
-              className="text-primary p-0 h-auto text-xs"
-              onClick={() => setUpgradeOpen(true)}
-            >
-              Upgrade your plan
-            </Button>{" "}
-            to download tax reports and export data.
-          </p>
-        )}
       </div>
 
       {/* Form 8949 Preview */}
@@ -423,9 +510,8 @@ export function TaxReports() {
           International Reports
         </h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Currently showing US reports. Country-specific summaries for UK HMRC,
-          Canadian T1135, Australian CGT, and German Anlage SO are available on
-          paid plans.
+          Country-specific summaries for UK HMRC, Canadian T1135, Australian
+          CGT, and German Anlage SO.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {[
@@ -434,113 +520,18 @@ export function TaxReports() {
             "Australia CGT",
             "Germany Anlage SO",
           ].map((report) => (
-            <div
+            <Button
               key={report}
-              className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-secondary/30 opacity-60"
+              variant="outline"
+              className="flex items-center gap-2 px-3 py-2 border-border text-foreground hover:bg-secondary justify-start h-auto"
+              onClick={() => handleDownload(report)}
             >
-              <Lock className="w-3 h-3 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">{report}</span>
-            </div>
+              <Download className="w-3 h-3 text-primary" />
+              <span className="text-xs">{report}</span>
+            </Button>
           ))}
         </div>
       </div>
-
-      {/* Upgrade Modal */}
-      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
-        <DialogContent
-          data-ocid="reports.upgrade_modal.dialog"
-          className="bg-card border-border text-foreground max-w-lg"
-        >
-          <DialogHeader>
-            <DialogTitle className="font-display flex items-center gap-2">
-              {upgradeSuccess ? (
-                <>
-                  <CheckCircle2 className="w-5 h-5 text-gain" />
-                  Upgraded Successfully!
-                </>
-              ) : (
-                <>
-                  <Lock className="w-5 h-5 text-primary" />
-                  Unlock Tax Reports
-                </>
-              )}
-            </DialogTitle>
-            {!upgradeSuccess && (
-              <DialogDescription className="text-muted-foreground text-sm">
-                Choose a plan to download your tax reports and export data.
-              </DialogDescription>
-            )}
-          </DialogHeader>
-
-          {!upgradeSuccess && (
-            <div className="space-y-3 py-2">
-              {PLAN_OPTIONS.map((plan) => (
-                <button
-                  key={plan.id}
-                  type="button"
-                  onClick={() => setSelectedPlan(plan.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between p-4 rounded-lg border-2 transition-all text-left",
-                    selectedPlan === plan.id
-                      ? "border-primary bg-primary/10"
-                      : cn(
-                          "border-border bg-secondary/30 hover:bg-secondary/50",
-                          plan.color,
-                        ),
-                  )}
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-foreground">
-                        {plan.name}
-                      </span>
-                      {plan.badge && (
-                        <Badge className="bg-primary text-primary-foreground text-xs px-1.5 py-0">
-                          {plan.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {plan.limit}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-lg font-bold text-foreground">
-                      {plan.price}
-                    </span>
-                    <p className="text-xs text-muted-foreground">
-                      per tax year
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!upgradeSuccess && (
-            <DialogFooter>
-              <Button
-                data-ocid="reports.upgrade_modal.cancel_button"
-                variant="outline"
-                onClick={() => setUpgradeOpen(false)}
-                className="border-border text-foreground"
-              >
-                Cancel
-              </Button>
-              <Button
-                data-ocid="reports.upgrade_modal.confirm_button"
-                onClick={handleUpgrade}
-                disabled={upgradeMutation.isPending}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                {upgradeMutation.isPending
-                  ? "Processing..."
-                  : `Upgrade to ${selectedPlan}`}
-              </Button>
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

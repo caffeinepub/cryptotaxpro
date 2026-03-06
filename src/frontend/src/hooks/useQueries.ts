@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Transaction, UserProfile } from "../backend.d";
-import {
-  mockHarvestCandidates,
-  mockPortfolioSummary,
-  mockTaxSummary,
-  mockTransactions,
-  mockUserProfile,
-} from "../data/mockData";
+import { useMemo } from "react";
+import type {
+  HarvestCandidate,
+  Holding,
+  PortfolioSummary,
+  TaxSummary,
+  Transaction,
+  UserProfile,
+} from "../backend.d";
+import { mockUserProfile } from "../data/mockData";
 import { useActor } from "./useActor";
 
 // ──────────────────────────────────────────────
@@ -17,14 +19,9 @@ export function useTransactions() {
   return useQuery({
     queryKey: ["transactions"],
     queryFn: async () => {
-      if (!actor) return mockTransactions;
-      try {
-        return await actor.getTransactions();
-      } catch {
-        return mockTransactions;
-      }
+      if (!actor) return [] as Transaction[];
+      return await actor.getTransactions();
     },
-    placeholderData: mockTransactions,
     enabled: !isFetching,
   });
 }
@@ -72,63 +69,216 @@ export function useDeleteTransaction() {
 }
 
 // ──────────────────────────────────────────────
-// Portfolio
+// Shared holding accumulation helper
 // ──────────────────────────────────────────────
-export function usePortfolioSummary() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["portfolio"],
-    queryFn: async () => {
-      if (!actor) return mockPortfolioSummary;
-      try {
-        return await actor.getPortfolioSummary();
-      } catch {
-        return mockPortfolioSummary;
-      }
-    },
-    placeholderData: mockPortfolioSummary,
-    enabled: !isFetching,
-  });
+interface AssetAccumulator {
+  netAmount: number;
+  totalCostBasis: number;
+  lastPriceUSD: number;
+  assetName: string;
+}
+
+function accumulateHoldings(
+  transactions: Transaction[],
+): Map<string, AssetAccumulator> {
+  const map = new Map<string, AssetAccumulator>();
+
+  for (const tx of transactions) {
+    const key = tx.asset;
+    if (!map.has(key)) {
+      map.set(key, {
+        netAmount: 0,
+        totalCostBasis: 0,
+        lastPriceUSD: 0,
+        assetName: tx.assetName,
+      });
+    }
+    const acc = map.get(key)!;
+
+    // Track latest price
+    if (tx.priceUSD > 0) {
+      acc.lastPriceUSD = tx.priceUSD;
+    }
+    acc.assetName = tx.assetName || acc.assetName;
+
+    const type = tx.txType.toLowerCase();
+    if (type === "trade" || type === "sell" || type === "nft") {
+      // Selling / disposing reduces holding
+      acc.netAmount -= tx.amount;
+    } else if (type === "transfer") {
+      // Neutral — own wallet move
+    } else {
+      // Buy, Staking, Airdrop, Mining, DeFi, etc. — adds to holding
+      acc.netAmount += tx.amount;
+      acc.totalCostBasis += tx.costBasisUSD * tx.amount;
+    }
+  }
+
+  return map;
 }
 
 // ──────────────────────────────────────────────
-// Tax Summary
+// Portfolio — computed from transactions
 // ──────────────────────────────────────────────
-export function useTaxSummary(year: bigint) {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["taxSummary", year.toString()],
-    queryFn: async () => {
-      if (!actor) return mockTaxSummary;
-      try {
-        return await actor.getTaxSummary(year);
-      } catch {
-        return mockTaxSummary;
-      }
-    },
-    placeholderData: mockTaxSummary,
-    enabled: !isFetching,
-  });
+export function usePortfolioSummary(): {
+  data: PortfolioSummary;
+  isLoading: boolean;
+} {
+  const { data: transactions, isLoading } = useTransactions();
+
+  const data = useMemo<PortfolioSummary>(() => {
+    if (!transactions || transactions.length === 0) {
+      return { holdings: [], totalValue: 0, totalUnrealizedGain: 0 };
+    }
+
+    const map = accumulateHoldings(transactions);
+    const holdings: Holding[] = [];
+
+    for (const [asset, acc] of map.entries()) {
+      if (acc.netAmount < 0.001) continue;
+
+      const currentPriceUSD = acc.lastPriceUSD;
+      const currentValueUSD = acc.netAmount * currentPriceUSD;
+      const costBasisPerUnit =
+        acc.netAmount > 0 ? acc.totalCostBasis / acc.netAmount : 0;
+      const totalCost = costBasisPerUnit * acc.netAmount;
+      const unrealizedGainLoss = currentValueUSD - totalCost;
+      const unrealizedPct =
+        totalCost > 0 ? (unrealizedGainLoss / totalCost) * 100 : 0;
+
+      holdings.push({
+        asset,
+        assetName: acc.assetName || asset,
+        amount: acc.netAmount,
+        currentPriceUSD,
+        currentValueUSD,
+        costBasisUSD: costBasisPerUnit,
+        unrealizedGainLoss,
+        unrealizedPct,
+      });
+    }
+
+    const totalValue = holdings.reduce((sum, h) => sum + h.currentValueUSD, 0);
+    const totalUnrealizedGain = holdings.reduce(
+      (sum, h) => sum + h.unrealizedGainLoss,
+      0,
+    );
+
+    return { holdings, totalValue, totalUnrealizedGain };
+  }, [transactions]);
+
+  return { data, isLoading };
 }
 
 // ──────────────────────────────────────────────
-// Harvest Candidates
+// Tax Summary — computed from transactions
 // ──────────────────────────────────────────────
-export function useHarvestCandidates() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["harvestCandidates"],
-    queryFn: async () => {
-      if (!actor) return mockHarvestCandidates;
-      try {
-        return await actor.getHarvestCandidates();
-      } catch {
-        return mockHarvestCandidates;
+export function useTaxSummary(year: bigint): {
+  data: TaxSummary;
+  isLoading: boolean;
+} {
+  const { data: transactions, isLoading } = useTransactions();
+  const yearStr = year.toString();
+
+  const data = useMemo<TaxSummary>(() => {
+    const empty: TaxSummary = {
+      taxYear: year,
+      shortTermGains: 0,
+      longTermGains: 0,
+      income: 0,
+      losses: 0,
+      netGains: 0,
+      estimatedTax: 0,
+    };
+
+    if (!transactions || transactions.length === 0) return empty;
+
+    const yearTxs = transactions.filter((tx) => tx.date.startsWith(yearStr));
+    if (yearTxs.length === 0) return empty;
+
+    let shortTermGains = 0;
+    let longTermGains = 0;
+    let income = 0;
+    let losses = 0;
+
+    for (const tx of yearTxs) {
+      const type = tx.txType.toLowerCase();
+      if (type === "staking" || type === "airdrop" || type === "mining") {
+        income += tx.gainLossUSD;
+      } else if (type === "trade" || type === "nft" || type === "defi") {
+        if (tx.gainLossUSD >= 0) {
+          if (tx.isShortTerm) {
+            shortTermGains += tx.gainLossUSD;
+          } else {
+            longTermGains += tx.gainLossUSD;
+          }
+        } else {
+          losses += tx.gainLossUSD;
+        }
       }
-    },
-    placeholderData: mockHarvestCandidates,
-    enabled: !isFetching,
-  });
+    }
+
+    const netGains = shortTermGains + longTermGains + income + losses;
+    const estimatedTax = Math.max(
+      0,
+      (shortTermGains + income) * 0.37 + longTermGains * 0.2 + losses * 0.3,
+    );
+
+    return {
+      taxYear: year,
+      shortTermGains,
+      longTermGains,
+      income,
+      losses,
+      netGains,
+      estimatedTax,
+    };
+  }, [transactions, yearStr, year]);
+
+  return { data, isLoading };
+}
+
+// ──────────────────────────────────────────────
+// Harvest Candidates — computed from transactions
+// ──────────────────────────────────────────────
+export function useHarvestCandidates(): {
+  data: HarvestCandidate[];
+  isLoading: boolean;
+} {
+  const { data: transactions, isLoading } = useTransactions();
+
+  const data = useMemo<HarvestCandidate[]>(() => {
+    if (!transactions || transactions.length === 0) return [];
+
+    const map = accumulateHoldings(transactions);
+    const candidates: HarvestCandidate[] = [];
+
+    for (const [asset, acc] of map.entries()) {
+      if (acc.netAmount < 0.001) continue;
+
+      const currentPrice = acc.lastPriceUSD;
+      const currentValue = acc.netAmount * currentPrice;
+      const costBasisPerUnit =
+        acc.netAmount > 0 ? acc.totalCostBasis / acc.netAmount : 0;
+      const totalCost = costBasisPerUnit * acc.netAmount;
+      const unrealizedGainLoss = currentValue - totalCost;
+
+      if (unrealizedGainLoss < 0) {
+        candidates.push({
+          asset,
+          assetName: acc.assetName || asset,
+          amount: acc.netAmount,
+          currentPrice,
+          unrealizedLoss: unrealizedGainLoss, // negative value
+          taxSavings: Math.abs(unrealizedGainLoss) * 0.3,
+        });
+      }
+    }
+
+    return candidates;
+  }, [transactions]);
+
+  return { data, isLoading };
 }
 
 // ──────────────────────────────────────────────

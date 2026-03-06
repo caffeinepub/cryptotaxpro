@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Calculator,
@@ -29,6 +30,7 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { UserProfile } from "../backend.d";
+import { useActor } from "../hooks/useActor";
 import { useSaveUserProfile, useUserProfile } from "../hooks/useQueries";
 
 const COUNTRIES = [
@@ -116,6 +118,8 @@ const COST_BASIS_METHODS: CostBasisOption[] = [
 export function Settings() {
   const { data: profile, isLoading } = useUserProfile();
   const saveMutation = useSaveUserProfile();
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
 
   const [formData, setFormData] = useState<UserProfile>({
     country: "US",
@@ -145,10 +149,26 @@ export function Settings() {
 
   async function handleReset() {
     setResetting(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setResetting(false);
-    setResetDialogOpen(false);
-    toast.success("All data has been reset");
+    try {
+      if (actor) {
+        // Delete all transactions from the backend
+        const transactions = await actor.getTransactions();
+        await Promise.all(
+          transactions.map((tx) => actor.deleteTransaction(tx.id)),
+        );
+      }
+      // Set transactions to empty immediately — portfolio, tax summary, and harvest
+      // candidates are all derived from transactions via useMemo, so they will
+      // update automatically without needing separate setQueryData calls.
+      queryClient.setQueryData(["transactions"], []);
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      setResetDialogOpen(false);
+      toast.success("All data has been reset");
+    } catch {
+      toast.error("Failed to reset data");
+    } finally {
+      setResetting(false);
+    }
   }
 
   if (isLoading) {

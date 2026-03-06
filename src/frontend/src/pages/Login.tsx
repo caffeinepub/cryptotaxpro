@@ -1,11 +1,21 @@
 import { Button } from "@/components/ui/button";
+import { useNavigate } from "@tanstack/react-router";
 import { Loader2, TrendingUp } from "lucide-react";
 import { motion } from "motion/react";
+import { useEffect } from "react";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 
 export function Login() {
-  const { login, isInitializing, isLoggingIn } = useInternetIdentity();
+  const { login, isInitializing, isLoggingIn, identity } =
+    useInternetIdentity();
   const busy = isInitializing || isLoggingIn;
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (identity) {
+      void navigate({ to: "/dashboard" });
+    }
+  }, [identity, navigate]);
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background relative overflow-hidden">
