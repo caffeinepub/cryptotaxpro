@@ -8,13 +8,13 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
-import Migration "migration";
+
 
 import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
 
 // Data migration on upgrade
-(with migration = Migration.run)
+
 actor {
   // Data Types
   type UserProfile = {
