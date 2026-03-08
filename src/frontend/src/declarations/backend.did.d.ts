@@ -28,6 +28,14 @@ export interface Holding {
   'currentValueUSD' : number,
   'amount' : number,
 }
+export interface IntegrationConnection {
+  'id' : string,
+  'name' : string,
+  'connectedAt' : bigint,
+  'address' : string,
+  'category' : string,
+  'hasApiKey' : boolean,
+}
 export interface PortfolioSummary {
   'totalValue' : number,
   'holdings' : Array<Holding>,
@@ -73,10 +81,12 @@ export interface _SERVICE {
   '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
   'addTransaction' : ActorMethod<[Transaction], bigint>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'deleteIntegration' : ActorMethod<[string], undefined>,
   'deleteTransaction' : ActorMethod<[bigint], undefined>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getHarvestCandidates' : ActorMethod<[], Array<HarvestCandidate>>,
+  'getIntegrations' : ActorMethod<[], Array<IntegrationConnection>>,
   'getPortfolioSummary' : ActorMethod<[], PortfolioSummary>,
   'getTaxSummary' : ActorMethod<[bigint], TaxSummary>,
   'getTransaction' : ActorMethod<[bigint], Transaction>,
@@ -84,6 +94,7 @@ export interface _SERVICE {
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'saveIntegration' : ActorMethod<[IntegrationConnection], undefined>,
   'updateTransaction' : ActorMethod<[Transaction], undefined>,
   'upgradePlan' : ActorMethod<[string], undefined>,
 }

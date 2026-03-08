@@ -45,6 +45,14 @@ export const HarvestCandidate = IDL.Record({
   'assetName' : IDL.Text,
   'amount' : IDL.Float64,
 });
+export const IntegrationConnection = IDL.Record({
+  'id' : IDL.Text,
+  'name' : IDL.Text,
+  'connectedAt' : IDL.Int,
+  'address' : IDL.Text,
+  'category' : IDL.Text,
+  'hasApiKey' : IDL.Bool,
+});
 export const Holding = IDL.Record({
   'unrealizedGainLoss' : IDL.Float64,
   'asset' : IDL.Text,
@@ -74,10 +82,12 @@ export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
   'addTransaction' : IDL.Func([Transaction], [IDL.Nat], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+  'deleteIntegration' : IDL.Func([IDL.Text], [], []),
   'deleteTransaction' : IDL.Func([IDL.Nat], [], []),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getHarvestCandidates' : IDL.Func([], [IDL.Vec(HarvestCandidate)], ['query']),
+  'getIntegrations' : IDL.Func([], [IDL.Vec(IntegrationConnection)], ['query']),
   'getPortfolioSummary' : IDL.Func([], [PortfolioSummary], ['query']),
   'getTaxSummary' : IDL.Func([IDL.Nat], [TaxSummary], ['query']),
   'getTransaction' : IDL.Func([IDL.Nat], [Transaction], ['query']),
@@ -89,6 +99,7 @@ export const idlService = IDL.Service({
     ),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'saveIntegration' : IDL.Func([IntegrationConnection], [], []),
   'updateTransaction' : IDL.Func([Transaction], [], []),
   'upgradePlan' : IDL.Func([IDL.Text], [], []),
 });
@@ -133,6 +144,14 @@ export const idlFactory = ({ IDL }) => {
     'assetName' : IDL.Text,
     'amount' : IDL.Float64,
   });
+  const IntegrationConnection = IDL.Record({
+    'id' : IDL.Text,
+    'name' : IDL.Text,
+    'connectedAt' : IDL.Int,
+    'address' : IDL.Text,
+    'category' : IDL.Text,
+    'hasApiKey' : IDL.Bool,
+  });
   const Holding = IDL.Record({
     'unrealizedGainLoss' : IDL.Float64,
     'asset' : IDL.Text,
@@ -162,12 +181,18 @@ export const idlFactory = ({ IDL }) => {
     '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
     'addTransaction' : IDL.Func([Transaction], [IDL.Nat], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'deleteIntegration' : IDL.Func([IDL.Text], [], []),
     'deleteTransaction' : IDL.Func([IDL.Nat], [], []),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getHarvestCandidates' : IDL.Func(
         [],
         [IDL.Vec(HarvestCandidate)],
+        ['query'],
+      ),
+    'getIntegrations' : IDL.Func(
+        [],
+        [IDL.Vec(IntegrationConnection)],
         ['query'],
       ),
     'getPortfolioSummary' : IDL.Func([], [PortfolioSummary], ['query']),
@@ -181,6 +206,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'saveIntegration' : IDL.Func([IntegrationConnection], [], []),
     'updateTransaction' : IDL.Func([Transaction], [], []),
     'upgradePlan' : IDL.Func([IDL.Text], [], []),
   });

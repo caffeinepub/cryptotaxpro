@@ -329,3 +329,52 @@ export function useUpgradePlan() {
     },
   });
 }
+
+// ──────────────────────────────────────────────
+// Integrations
+// ──────────────────────────────────────────────
+import type { IntegrationConnection } from "../backend.d";
+
+export function useIntegrations() {
+  const { actor, isFetching } = useActor();
+  return useQuery({
+    queryKey: ["integrations"],
+    queryFn: async () => {
+      if (!actor) return [] as IntegrationConnection[];
+      try {
+        return await actor.getIntegrations();
+      } catch {
+        return [] as IntegrationConnection[];
+      }
+    },
+    enabled: !isFetching,
+  });
+}
+
+export function useSaveIntegration() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (connection: IntegrationConnection) => {
+      if (!actor) throw new Error("No actor");
+      return actor.saveIntegration(connection);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+export function useDeleteIntegration() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!actor) throw new Error("No actor");
+      return actor.deleteIntegration(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}

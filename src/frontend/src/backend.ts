@@ -121,6 +121,14 @@ export interface PortfolioSummary {
     holdings: Array<Holding>;
     totalUnrealizedGain: number;
 }
+export interface IntegrationConnection {
+    id: string;
+    name: string;
+    connectedAt: bigint;
+    address: string;
+    category: string;
+    hasApiKey: boolean;
+}
 export interface UserProfile {
     country: string;
     plan: string;
@@ -154,17 +162,20 @@ export interface backendInterface {
     _initializeAccessControlWithSecret(userSecret: string): Promise<void>;
     addTransaction(transaction: Transaction): Promise<bigint>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    deleteIntegration(id: string): Promise<void>;
     deleteTransaction(id: bigint): Promise<void>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getHarvestCandidates(): Promise<Array<HarvestCandidate>>;
+    getIntegrations(): Promise<Array<IntegrationConnection>>;
     getPortfolioSummary(): Promise<PortfolioSummary>;
-    getTaxSummary(_year: bigint): Promise<TaxSummary>;
+    getTaxSummary(year: bigint): Promise<TaxSummary>;
     getTransaction(id: bigint): Promise<Transaction>;
     getTransactions(): Promise<Array<Transaction>>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveIntegration(connection: IntegrationConnection): Promise<void>;
     updateTransaction(updated: Transaction): Promise<void>;
     upgradePlan(newPlan: string): Promise<void>;
 }
@@ -210,6 +221,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.assignCallerUserRole(arg0, to_candid_UserRole_n1(this._uploadFile, this._downloadFile, arg1));
+            return result;
+        }
+    }
+    async deleteIntegration(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteIntegration(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteIntegration(arg0);
             return result;
         }
     }
@@ -266,6 +291,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.getHarvestCandidates();
+            return result;
+        }
+    }
+    async getIntegrations(): Promise<Array<IntegrationConnection>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getIntegrations();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getIntegrations();
             return result;
         }
     }
@@ -364,6 +403,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.saveCallerUserProfile(arg0);
+            return result;
+        }
+    }
+    async saveIntegration(arg0: IntegrationConnection): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveIntegration(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveIntegration(arg0);
             return result;
         }
     }

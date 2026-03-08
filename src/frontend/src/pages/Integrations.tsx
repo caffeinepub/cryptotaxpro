@@ -9,19 +9,26 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  useDeleteIntegration,
+  useIntegrations,
+  useSaveIntegration,
+} from "@/hooks/useQueries";
 import { cn } from "@/lib/utils";
 import {
   Check,
   Hash,
   Key,
+  Loader2,
   RefreshCw,
   Search,
   Upload,
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 interface Integration {
@@ -180,7 +187,6 @@ const ICON_COLORS: Record<string, string> = {
 
 export function Integrations() {
   const [search, setSearch] = useState("");
-  const [integrations, setIntegrations] = useState(INTEGRATIONS);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [connectState, setConnectState] = useState<
     "idle" | "connecting" | "connected"
@@ -190,6 +196,23 @@ export function Integrations() {
   const [address, setAddress] = useState("");
   const [csvModalOpen, setCsvModalOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+
+  // Backend integration state
+  const { data: savedIntegrations, isLoading: integrationsLoading } =
+    useIntegrations();
+
+  const saveIntegration = useSaveIntegration();
+  const deleteIntegration = useDeleteIntegration();
+
+  // Merge static list with saved backend state
+  const integrations = useMemo<Integration[]>(() => {
+    const connectedIds = new Set((savedIntegrations ?? []).map((s) => s.id));
+    return INTEGRATIONS.map((i) => ({
+      ...i,
+      connected: connectedIds.has(i.id),
+    }));
+  }, [savedIntegrations]);
 
   const filtered = integrations.filter((i) =>
     i.name.toLowerCase().includes(search.toLowerCase()),
@@ -205,28 +228,54 @@ export function Integrations() {
     setAddress("");
   }
 
-  function handleConnect() {
+  async function handleConnect() {
+    if (!connectingId || !connectingItem) return;
+
     setConnectState("connecting");
-    setTimeout(() => {
+
+    // Simulate the connection handshake delay
+    await new Promise((r) => setTimeout(r, 1500));
+
+    try {
+      await saveIntegration.mutateAsync({
+        id: connectingId,
+        name: connectingItem.name,
+        category: connectingItem.category,
+        hasApiKey: apiKey.trim().length > 0,
+        address: address.trim(),
+        connectedAt: BigInt(Date.now()) * BigInt(1_000_000),
+      });
+
       setConnectState("connected");
-      setIntegrations((prev) =>
-        prev.map((i) =>
-          i.id === connectingId ? { ...i, connected: true } : i,
-        ),
-      );
+
       setTimeout(() => {
         setConnectingId(null);
         setConnectState("idle");
-        toast.success(`${connectingItem?.name} connected successfully!`);
+        toast.success(`${connectingItem.name} connected successfully!`);
       }, 1000);
-    }, 1500);
+    } catch (err) {
+      console.error("Failed to save integration:", err);
+      setConnectState("idle");
+      toast.error(
+        `Failed to connect ${connectingItem.name}. Please try again.`,
+      );
+    }
   }
 
-  function handleDisconnect(id: string) {
-    setIntegrations((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, connected: false } : i)),
-    );
-    toast.info("Integration disconnected");
+  async function handleDisconnect(id: string) {
+    setDisconnectingId(id);
+    const item = integrations.find((i) => i.id === id);
+    try {
+      await deleteIntegration.mutateAsync(id);
+      toast.info(`${item?.name ?? "Integration"} disconnected`);
+    } catch (err) {
+      console.error("Failed to disconnect integration:", err);
+      toast.error(
+        `Failed to disconnect ${item?.name ?? "integration"}. Please try again.`,
+      );
+    } finally {
+      setDisconnectingId(null);
+    }
   }
 
   async function handleSyncAll() {
@@ -289,91 +338,126 @@ export function Integrations() {
       </div>
 
       {/* Integration Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        {filtered.map((integration, idx) => (
-          <div
-            key={integration.id}
-            className={cn(
-              "rounded-lg border bg-card p-4 flex flex-col gap-3 transition-all duration-200",
-              integration.connected
-                ? "border-primary/30 bg-primary/5"
-                : "border-border hover:border-border hover:bg-secondary/20",
-            )}
-          >
-            {/* Icon + Name */}
-            <div className="flex items-start justify-between">
+      {integrationsLoading ? (
+        <div
+          data-ocid="integrations.loading_state"
+          className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+        >
+          {Array.from({ length: 10 }, (_, i) => `skeleton-${i}`).map(
+            (skKey) => (
               <div
-                className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold",
-                  ICON_COLORS[integration.category],
-                )}
+                key={skKey}
+                className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3"
               >
-                {integration.icon}
-              </div>
-              {integration.connected && (
-                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gain-subtle">
-                  <Check className="w-3 h-3 text-gain" />
+                <Skeleton className="w-10 h-10 rounded-lg" />
+                <div className="space-y-1.5">
+                  <Skeleton className="h-3.5 w-24 rounded" />
+                  <Skeleton className="h-3 w-14 rounded" />
                 </div>
+                <Skeleton className="h-7 w-full rounded" />
+              </div>
+            ),
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          {filtered.map((integration, idx) => (
+            <div
+              key={integration.id}
+              data-ocid={`integrations.item.${idx + 1}`}
+              className={cn(
+                "rounded-lg border bg-card p-4 flex flex-col gap-3 transition-all duration-200",
+                integration.connected
+                  ? "border-primary/30 bg-primary/5"
+                  : "border-border hover:border-border hover:bg-secondary/20",
               )}
-            </div>
-
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-foreground leading-tight">
-                {integration.name}
-              </p>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <span
+            >
+              {/* Icon + Name */}
+              <div className="flex items-start justify-between">
+                <div
                   className={cn(
-                    "text-xs px-1.5 py-0.5 rounded border",
-                    CATEGORY_COLORS[integration.category],
+                    "w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold",
+                    ICON_COLORS[integration.category],
                   )}
                 >
-                  {integration.category}
-                </span>
-                {integration.defunct && (
-                  <span className="text-xs px-1.5 py-0.5 rounded border border-red-500/30 text-red-400 bg-red-500/10">
-                    Defunct
+                  {integration.icon}
+                </div>
+                {integration.connected && (
+                  <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gain-subtle">
+                    <Check className="w-3 h-3 text-gain" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-foreground leading-tight">
+                  {integration.name}
+                </p>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className={cn(
+                      "text-xs px-1.5 py-0.5 rounded border",
+                      CATEGORY_COLORS[integration.category],
+                    )}
+                  >
+                    {integration.category}
                   </span>
+                  {integration.defunct && (
+                    <span className="text-xs px-1.5 py-0.5 rounded border border-red-500/30 text-red-400 bg-red-500/10">
+                      Defunct
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Action */}
+              <div className="flex items-center gap-1.5">
+                {integration.connected ? (
+                  <>
+                    <div className="flex items-center gap-1 flex-1">
+                      <Wifi className="w-3 h-3 text-gain" />
+                      <span className="text-xs text-gain">Connected</span>
+                    </div>
+                    <Button
+                      data-ocid={`integrations.delete_button.${idx + 1}`}
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      disabled={disconnectingId === integration.id}
+                      onClick={() => handleDisconnect(integration.id)}
+                    >
+                      {disconnectingId === integration.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <WifiOff className="w-3 h-3" />
+                      )}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    data-ocid={`integrations.connect_button.${idx + 1}`}
+                    size="sm"
+                    variant="outline"
+                    className="w-full h-7 text-xs border-border text-foreground hover:bg-secondary hover:border-primary/40"
+                    disabled={integration.defunct}
+                    onClick={() => openConnect(integration.id)}
+                  >
+                    {integration.defunct ? "Unavailable" : "Connect"}
+                  </Button>
                 )}
               </div>
             </div>
-
-            {/* Action */}
-            <div className="flex items-center gap-1.5">
-              {integration.connected ? (
-                <>
-                  <div className="flex items-center gap-1 flex-1">
-                    <Wifi className="w-3 h-3 text-gain" />
-                    <span className="text-xs text-gain">Connected</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
-                    onClick={() => handleDisconnect(integration.id)}
-                  >
-                    <WifiOff className="w-3 h-3" />
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  data-ocid={`integrations.connect_button.${idx + 1}`}
-                  size="sm"
-                  variant="outline"
-                  className="w-full h-7 text-xs border-border text-foreground hover:bg-secondary hover:border-primary/40"
-                  disabled={integration.defunct}
-                  onClick={() => openConnect(integration.id)}
-                >
-                  {integration.defunct ? "Unavailable" : "Connect"}
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Connect Modal */}
-      <Dialog open={!!connectingId} onOpenChange={() => setConnectingId(null)}>
+      <Dialog
+        open={!!connectingId}
+        onOpenChange={() => {
+          if (connectState !== "connecting") setConnectingId(null);
+        }}
+      >
         <DialogContent
           data-ocid="integrations.connect_modal.dialog"
           className="bg-card border-border text-foreground max-w-md"
@@ -396,6 +480,7 @@ export function Integrations() {
               <TabsList className="w-full bg-secondary border border-border">
                 <TabsTrigger
                   value="api"
+                  data-ocid="integrations.connect_modal.tab"
                   className="flex-1 data-[state=active]:bg-card"
                 >
                   <Key className="w-3.5 h-3.5 mr-2" />
@@ -416,10 +501,12 @@ export function Integrations() {
                     API Key (Read-Only)
                   </Label>
                   <Input
+                    data-ocid="integrations.connect_modal.input"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder="Enter your read-only API key"
                     className="bg-secondary border-border text-foreground font-mono text-xs"
+                    disabled={connectState === "connecting"}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -432,6 +519,7 @@ export function Integrations() {
                     onChange={(e) => setApiSecret(e.target.value)}
                     placeholder="Enter your API secret"
                     className="bg-secondary border-border text-foreground font-mono text-xs"
+                    disabled={connectState === "connecting"}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -450,6 +538,7 @@ export function Integrations() {
                     onChange={(e) => setAddress(e.target.value)}
                     placeholder="0x... or bc1... or addr1..."
                     className="bg-secondary border-border text-foreground font-mono text-xs"
+                    disabled={connectState === "connecting"}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -472,6 +561,7 @@ export function Integrations() {
           {connectState !== "connected" && connectState !== "connecting" && (
             <DialogFooter>
               <Button
+                data-ocid="integrations.connect_modal.cancel_button"
                 variant="outline"
                 onClick={() => setConnectingId(null)}
                 className="border-border text-foreground"
@@ -519,7 +609,7 @@ export function Integrations() {
             </p>
             <button
               type="button"
-              data-ocid="integrations.upload_button"
+              data-ocid="integrations.csv_modal.upload_button"
               className="text-xs text-primary hover:text-primary/80 underline cursor-pointer"
               onClick={() => toast.info("File browser would open here")}
             >

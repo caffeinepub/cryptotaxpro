@@ -39,6 +39,14 @@ export interface PortfolioSummary {
     holdings: Array<Holding>;
     totalUnrealizedGain: number;
 }
+export interface IntegrationConnection {
+    id: string;
+    name: string;
+    connectedAt: bigint;
+    address: string;
+    category: string;
+    hasApiKey: boolean;
+}
 export interface UserProfile {
     country: string;
     plan: string;
@@ -71,17 +79,20 @@ export enum UserRole {
 export interface backendInterface {
     addTransaction(transaction: Transaction): Promise<bigint>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    deleteIntegration(id: string): Promise<void>;
     deleteTransaction(id: bigint): Promise<void>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getHarvestCandidates(): Promise<Array<HarvestCandidate>>;
+    getIntegrations(): Promise<Array<IntegrationConnection>>;
     getPortfolioSummary(): Promise<PortfolioSummary>;
-    getTaxSummary(_year: bigint): Promise<TaxSummary>;
+    getTaxSummary(year: bigint): Promise<TaxSummary>;
     getTransaction(id: bigint): Promise<Transaction>;
     getTransactions(): Promise<Array<Transaction>>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveIntegration(connection: IntegrationConnection): Promise<void>;
     updateTransaction(updated: Transaction): Promise<void>;
     upgradePlan(newPlan: string): Promise<void>;
 }

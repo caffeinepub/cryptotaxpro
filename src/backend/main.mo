@@ -6,12 +6,15 @@ import Float "mo:core/Float";
 import Order "mo:core/Order";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
-import Time "mo:core/Time";
 import Text "mo:core/Text";
+import Time "mo:core/Time";
+import Migration "migration";
 
 import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
 
+// Data migration on upgrade
+(with migration = Migration.run)
 actor {
   // Data Types
   type UserProfile = {
@@ -94,9 +97,19 @@ actor {
     totalUnrealizedGain : Float;
   };
 
+  type IntegrationConnection = {
+    id : Text;
+    name : Text;
+    category : Text;
+    hasApiKey : Bool;
+    address : Text;
+    connectedAt : Int;
+  };
+
   // State
   let userProfiles = Map.empty<Principal, UserProfile>();
   let userTransactions = Map.empty<Principal, List.List<Transaction>>();
+  let userIntegrations = Map.empty<Principal, List.List<IntegrationConnection>>();
   var nextTransactionId = 1;
 
   // Authorization System
@@ -236,28 +249,29 @@ actor {
       Runtime.trap("Unauthorized: Only users can access their portfolio");
     };
 
-    let holdings = [createHolding("BTC", "Bitcoin", 1.5, 57000.0, 1.5 * 57000.0, 60000.0, 57000.0 - 60000.0, (57000.0 - 60000.0) / 60000.0 * 100.0)];
+    // Return empty holdings and zeroed values per requirements
     let summary : PortfolioSummary = {
-      holdings;
-      totalValue = 85000.0;
-      totalUnrealizedGain = 5000.0;
+      holdings = [];
+      totalValue = 0.0;
+      totalUnrealizedGain = 0.0;
     };
     summary;
   };
 
-  public query ({ caller }) func getTaxSummary(_year : Nat) : async TaxSummary {
+  public query ({ caller }) func getTaxSummary(year : Nat) : async TaxSummary {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can access their tax summaries");
     };
 
+    // Return zeros for all fields per requirements
     let summary : TaxSummary = {
-      taxYear = 2024;
-      shortTermGains = 12000.0;
-      longTermGains = 30000.0;
-      income = 8000.0;
-      losses = -6000.0;
-      netGains = 44000.0;
-      estimatedTax = 12000.0;
+      taxYear = year;
+      shortTermGains = 0.0;
+      longTermGains = 0.0;
+      income = 0.0;
+      losses = 0.0;
+      netGains = 0.0;
+      estimatedTax = 0.0;
     };
     summary;
   };
@@ -267,8 +281,57 @@ actor {
       Runtime.trap("Unauthorized: Only users can access their harvest candidates");
     };
 
-    let candidates = [createHarvestCandidate("ADA", "Cardano", -2000.0, 600.0, 10000.0, 0.15)];
-    candidates;
+    // Return empty array per requirements
+    [];
+  };
+
+  // Integration Management
+  public shared ({ caller }) func saveIntegration(connection : IntegrationConnection) : async () {
+    // Authorization check
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can manage integrations");
+    };
+
+    let connections = switch (userIntegrations.get(caller)) {
+      case (null) { List.empty<IntegrationConnection>() };
+      case (?connections) { connections };
+    };
+
+    // Remove existing integration with same id if present
+    let filtered = connections.filter(func(con) { con.id != connection.id });
+
+    // Add new/updated integration to front
+    filtered.add(connection);
+    userIntegrations.add(caller, filtered);
+  };
+
+  public query ({ caller }) func getIntegrations() : async [IntegrationConnection] {
+    // Authorization check
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can fetch integrations");
+    };
+
+    let connections = switch (userIntegrations.get(caller)) {
+      case (null) { List.empty<IntegrationConnection>() };
+      case (?connections) { connections };
+    };
+
+    connections.toArray();
+  };
+
+  public shared ({ caller }) func deleteIntegration(id : Text) : async () {
+    // Authorization check
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can manage integrations");
+    };
+
+    let connections = switch (userIntegrations.get(caller)) {
+      case (null) { List.empty<IntegrationConnection>() };
+      case (?connections) { connections };
+    };
+
+    let filtered = connections.filter(func(con) { con.id != id });
+    userIntegrations.add(caller, filtered);
   };
 
   // Plan Management
@@ -289,31 +352,6 @@ actor {
         };
         userProfiles.add(caller, updated);
       };
-    };
-  };
-
-  // Internal Helper Functions
-  func createHolding(asset : Text, assetName : Text, amount : Float, currentPriceUSD : Float, currentValueUSD : Float, costBasisUSD : Float, unrealizedGainLoss : Float, unrealizedPct : Float) : Holding {
-    {
-      asset;
-      assetName;
-      amount;
-      currentPriceUSD;
-      currentValueUSD;
-      costBasisUSD;
-      unrealizedGainLoss;
-      unrealizedPct;
-    };
-  };
-
-  func createHarvestCandidate(asset : Text, assetName : Text, unrealizedLoss : Float, taxSavings : Float, amount : Float, currentPrice : Float) : HarvestCandidate {
-    {
-      asset;
-      assetName;
-      unrealizedLoss;
-      taxSavings;
-      amount;
-      currentPrice;
     };
   };
 };
