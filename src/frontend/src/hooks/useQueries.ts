@@ -13,19 +13,28 @@ import { mockUserProfile } from "../data/mockData";
 import { useActor } from "./useActor";
 
 // ──────────────────────────────────────────────
-// Helper: get actor from React Query cache (handles race condition
+// Helper: wait for actor from React Query cache (handles race condition
 // where hook closure captures a stale null actor on first render)
+// Polls the cache until actor is available or times out after 8s.
 // ──────────────────────────────────────────────
-function getActorFromCache(
+export async function waitForActor(
   queryClient: ReturnType<typeof useQueryClient>,
-): backendInterface | null {
-  const queries = queryClient.getQueriesData<backendInterface>({
-    queryKey: ["actor"],
-  });
-  for (const [, data] of queries) {
-    if (data) return data;
+  timeoutMs = 8000,
+): Promise<backendInterface> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const queries = queryClient.getQueriesData<backendInterface>({
+      queryKey: ["actor"],
+    });
+    for (const [, data] of queries) {
+      if (data) return data;
+    }
+    // Wait 100ms before retrying
+    await new Promise((r) => setTimeout(r, 100));
   }
-  return null;
+
+  throw new Error("Not connected to backend. Please refresh the page.");
 }
 
 // ──────────────────────────────────────────────
@@ -44,12 +53,10 @@ export function useTransactions() {
 }
 
 export function useAddTransaction() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (tx: Transaction) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.addTransaction(tx);
     },
     onSuccess: () => {
@@ -59,12 +66,10 @@ export function useAddTransaction() {
 }
 
 export function useUpdateTransaction() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (tx: Transaction) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.updateTransaction(tx);
     },
     onSuccess: () => {
@@ -74,12 +79,10 @@ export function useUpdateTransaction() {
 }
 
 export function useDeleteTransaction() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: bigint) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.deleteTransaction(id);
     },
     onSuccess: () => {
@@ -323,12 +326,10 @@ export function useUserProfile() {
 }
 
 export function useSaveUserProfile() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (profile: UserProfile) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.saveCallerUserProfile(profile);
     },
     onSuccess: () => {
@@ -338,12 +339,10 @@ export function useSaveUserProfile() {
 }
 
 export function useUpgradePlan() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (plan: string) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.upgradePlan(plan);
     },
     onSuccess: () => {
@@ -374,12 +373,10 @@ export function useIntegrations() {
 }
 
 export function useSaveIntegration() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (connection: IntegrationConnection) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.saveIntegration(connection);
     },
     onSuccess: () => {
@@ -389,12 +386,10 @@ export function useSaveIntegration() {
 }
 
 export function useDeleteIntegration() {
-  const { actor } = useActor();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const actorInstance = actor ?? getActorFromCache(queryClient);
-      if (!actorInstance) throw new Error("No actor");
+      const actorInstance = await waitForActor(queryClient);
       return actorInstance.deleteIntegration(id);
     },
     onSuccess: () => {

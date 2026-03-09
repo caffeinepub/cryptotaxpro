@@ -17,11 +17,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useActor } from "@/hooks/useActor";
 import {
   useDeleteIntegration,
   useIntegrations,
   useSaveIntegration,
+  waitForActor,
 } from "@/hooks/useQueries";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -217,7 +217,6 @@ export function Integrations() {
   // Per-integration sync error state (id -> error message)
   const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
 
-  const { actor } = useActor();
   const queryClient = useQueryClient();
 
   // Backend integration state
@@ -252,14 +251,12 @@ export function Integrations() {
   }
 
   async function syncIntegration(id: string, name: string): Promise<boolean> {
-    if (!actor) {
-      throw new Error("Not connected to backend. Please refresh the page.");
-    }
+    const actorInstance = await waitForActor(queryClient);
 
     // Generate realistic sample transactions for this integration
     const sampleTxs = generateSampleTransactions(id, name);
     for (let i = 0; i < sampleTxs.length; i++) {
-      await actor.addTransaction(sampleTxs[i]);
+      await actorInstance.addTransaction(sampleTxs[i]);
     }
 
     await queryClient.invalidateQueries({ queryKey: ["transactions"] });
