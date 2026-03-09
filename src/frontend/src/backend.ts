@@ -161,9 +161,11 @@ export enum UserRole {
 export interface backendInterface {
     _initializeAccessControlWithSecret(userSecret: string): Promise<void>;
     addTransaction(transaction: Transaction): Promise<bigint>;
+    addTransactions(transactions: Array<Transaction>): Promise<Array<bigint>>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     deleteIntegration(id: string): Promise<void>;
     deleteTransaction(id: bigint): Promise<void>;
+    deleteTransactionsByYear(year: bigint): Promise<bigint>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getHarvestCandidates(): Promise<Array<HarvestCandidate>>;
@@ -210,6 +212,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async addTransactions(arg0: Array<Transaction>): Promise<Array<bigint>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.addTransactions(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.addTransactions(arg0);
+            return result;
+        }
+    }
     async assignCallerUserRole(arg0: Principal, arg1: UserRole): Promise<void> {
         if (this.processError) {
             try {
@@ -249,6 +265,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.deleteTransaction(arg0);
+            return result;
+        }
+    }
+    async deleteTransactionsByYear(arg0: bigint): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteTransactionsByYear(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteTransactionsByYear(arg0);
             return result;
         }
     }

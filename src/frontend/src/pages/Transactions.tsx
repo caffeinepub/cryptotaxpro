@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,6 +46,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
+  CalendarX2,
   CheckCircle2,
   Edit2,
   FileUp,
@@ -46,13 +57,15 @@ import {
   Upload,
   XCircle,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Transaction } from "../backend.d";
 import { TxTypeBadge } from "../components/TxTypeBadge";
 import {
   useAddTransaction,
+  useAddTransactions,
   useDeleteTransaction,
+  useDeleteTransactionsByYear,
   useTransactions,
   useUpdateTransaction,
 } from "../hooks/useQueries";
@@ -547,7 +560,7 @@ interface CsvImportDialogProps {
 type ImportStep = "upload" | "preview" | "importing" | "done";
 
 function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
-  const addMutation = useAddTransaction();
+  const addBulkMutation = useAddTransactions();
   const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<ImportStep>("upload");
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
@@ -623,48 +636,38 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
     setImportTotal(parsedRows.length);
     setImportProgress(0);
 
-    let successCount = 0;
-    for (let i = 0; i < parsedRows.length; i++) {
-      const row = parsedRows[i];
-      try {
-        // Prepend transactionId to notes if present
-        const notes = row.transactionId
-          ? `TX: ${row.transactionId}${row.notes ? ` ${row.notes}` : ""}`.trim()
-          : row.notes;
+    const txs: Transaction[] = parsedRows.map((row, i) => ({
+      date: row.date,
+      txType: row.txType,
+      asset: row.asset,
+      assetName: row.assetName,
+      exchange: row.exchange,
+      amount: row.amount,
+      priceUSD: row.priceUSD,
+      costBasisUSD: row.costBasisUSD,
+      gainLossUSD: row.gainLossUSD,
+      notes: row.transactionId
+        ? `TX: ${row.transactionId}${row.notes ? ` ${row.notes}` : ""}`.trim()
+        : row.notes,
+      id: BigInt(Date.now() + i),
+      isFlagged: row.isFlagged ?? false,
+      flagReason: row.flagReason ?? "",
+      tags: row.tags ?? [],
+      isShortTerm: true,
+    }));
 
-        const tx: Transaction = {
-          date: row.date,
-          txType: row.txType,
-          asset: row.asset,
-          assetName: row.assetName,
-          exchange: row.exchange,
-          amount: row.amount,
-          priceUSD: row.priceUSD,
-          costBasisUSD: row.costBasisUSD,
-          gainLossUSD: row.gainLossUSD,
-          notes,
-          id: BigInt(Date.now() + i),
-          isFlagged: row.isFlagged ?? false,
-          flagReason: row.flagReason ?? "",
-          tags: row.tags ?? [],
-          isShortTerm: true,
-        };
-        await addMutation.mutateAsync(tx);
-        successCount++;
-      } catch {
-        // continue importing remaining rows
-      }
-      setImportProgress(i + 1);
+    try {
+      await addBulkMutation.mutateAsync(txs);
+      setImportProgress(parsedRows.length);
+      setStep("done");
+      toast.success(`Imported ${parsedRows.length} transactions`);
+    } catch (err) {
+      toast.error(
+        `Import failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+      setStep("preview");
     }
-
-    setStep("done");
-    toast.success(
-      `Imported ${successCount} of ${parsedRows.length} transactions`,
-    );
   }
-
-  const progressPct =
-    importTotal > 0 ? Math.round((importProgress / importTotal) * 100) : 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -832,11 +835,18 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
 
         {/* Step: Importing */}
         {step === "importing" && (
-          <div className="space-y-4 py-4">
-            <p className="text-sm text-foreground">
-              Importing {importProgress} / {importTotal} transactions...
-            </p>
-            <Progress value={progressPct} className="h-2" />
+          <div className="space-y-4 py-6">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-10 h-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-foreground">
+                Sending {importTotal} transactions to the blockchain...
+              </p>
+              <p className="text-xs text-muted-foreground text-center">
+                This is much faster now — all transactions are sent in a single
+                batch call.
+              </p>
+            </div>
+            <Progress value={50} className="h-1.5 animate-pulse" />
             <p className="text-xs text-muted-foreground text-center">
               Please wait, do not close this dialog.
             </p>
@@ -927,6 +937,7 @@ export function Transactions() {
   const addMutation = useAddTransaction();
   const updateMutation = useUpdateTransaction();
   const deleteMutation = useDeleteTransaction();
+  const deleteByYearMutation = useDeleteTransactionsByYear();
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
@@ -939,6 +950,46 @@ export function Transactions() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
   const [csvImportOpen, setCsvImportOpen] = useState(false);
+
+  // Delete by Year state
+  const [deleteByYearOpen, setDeleteByYearOpen] = useState(false);
+  const [selectedDeleteYear, setSelectedDeleteYear] = useState<string>("");
+  const [confirmDeleteByYearOpen, setConfirmDeleteByYearOpen] = useState(false);
+
+  // Derive available years from transactions
+  const availableYears = useMemo(() => {
+    if (!transactions || transactions.length === 0) return [];
+    const years = new Set<string>();
+    for (const tx of transactions) {
+      const year = tx.date.slice(0, 4);
+      if (year && /^\d{4}$/.test(year)) years.add(year);
+    }
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [transactions]);
+
+  const txCountForSelectedYear = useMemo(() => {
+    if (!selectedDeleteYear || !transactions) return 0;
+    return transactions.filter((tx) => tx.date.startsWith(selectedDeleteYear))
+      .length;
+  }, [transactions, selectedDeleteYear]);
+
+  async function handleDeleteByYear() {
+    if (!selectedDeleteYear) return;
+    try {
+      const count = await deleteByYearMutation.mutateAsync(
+        Number(selectedDeleteYear),
+      );
+      toast.success(`Deleted ${count} transactions from ${selectedDeleteYear}`);
+      setConfirmDeleteByYearOpen(false);
+      setDeleteByYearOpen(false);
+      setSelectedDeleteYear("");
+    } catch (err) {
+      toast.error(
+        `Failed to delete transactions: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+      setConfirmDeleteByYearOpen(false);
+    }
+  }
 
   // Filter transactions
   const filtered = (transactions ?? []).filter((tx) => {
@@ -1051,6 +1102,15 @@ export function Transactions() {
             >
               <Upload className="w-4 h-4 mr-2" />
               Import CSV
+            </Button>
+            <Button
+              data-ocid="transactions.delete_by_year.open_modal_button"
+              variant="outline"
+              onClick={() => setDeleteByYearOpen(true)}
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60"
+            >
+              <CalendarX2 className="w-4 h-4 mr-2" />
+              Delete by Year
             </Button>
             <Button
               data-ocid="transactions.add_button"
@@ -1369,6 +1429,147 @@ export function Transactions() {
 
         {/* CSV Import Dialog */}
         <CsvImportDialog open={csvImportOpen} onOpenChange={setCsvImportOpen} />
+
+        {/* Delete by Year Dialog */}
+        <Dialog
+          open={deleteByYearOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteByYearOpen(false);
+              setSelectedDeleteYear("");
+            }
+          }}
+        >
+          <DialogContent
+            data-ocid="transactions.delete_by_year.dialog"
+            className="bg-card border-border text-foreground max-w-sm"
+          >
+            <DialogHeader>
+              <DialogTitle className="font-display flex items-center gap-2">
+                <CalendarX2 className="w-4 h-4 text-destructive" />
+                Delete Transactions by Year
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="py-4 space-y-4">
+              {availableYears.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No transactions to delete.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Select a tax year to permanently delete all transactions in
+                    that year. This is useful for removing incorrect or
+                    duplicate imports.
+                  </p>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">
+                      Tax Year
+                    </Label>
+                    <Select
+                      value={selectedDeleteYear}
+                      onValueChange={setSelectedDeleteYear}
+                    >
+                      <SelectTrigger
+                        data-ocid="transactions.delete_by_year.select"
+                        className="bg-secondary border-border text-foreground"
+                      >
+                        <SelectValue placeholder="Select a year..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableYears.map((year) => {
+                          const count =
+                            transactions?.filter((tx) =>
+                              tx.date.startsWith(year),
+                            ).length ?? 0;
+                          return (
+                            <SelectItem key={year} value={year}>
+                              {year} — {count} transaction
+                              {count !== 1 ? "s" : ""}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                data-ocid="transactions.delete_by_year.cancel_button"
+                variant="outline"
+                onClick={() => {
+                  setDeleteByYearOpen(false);
+                  setSelectedDeleteYear("");
+                }}
+                className="border-border text-foreground"
+              >
+                Cancel
+              </Button>
+              {availableYears.length > 0 && (
+                <Button
+                  variant="destructive"
+                  disabled={!selectedDeleteYear}
+                  onClick={() => {
+                    if (selectedDeleteYear) {
+                      setConfirmDeleteByYearOpen(true);
+                    }
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Year
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirm Delete by Year AlertDialog */}
+        <AlertDialog
+          open={confirmDeleteByYearOpen}
+          onOpenChange={setConfirmDeleteByYearOpen}
+        >
+          <AlertDialogContent
+            data-ocid="transactions.delete_by_year.dialog"
+            className="bg-card border-border text-foreground"
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle className="font-display">
+                Delete all {selectedDeleteYear} transactions?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-muted-foreground">
+                This will permanently delete{" "}
+                <span className="font-semibold text-foreground">
+                  {txCountForSelectedYear} transaction
+                  {txCountForSelectedYear !== 1 ? "s" : ""}
+                </span>{" "}
+                from {selectedDeleteYear}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                data-ocid="transactions.delete_by_year.cancel_button"
+                className="border-border text-foreground"
+                onClick={() => setConfirmDeleteByYearOpen(false)}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                data-ocid="transactions.delete_by_year.confirm_button"
+                onClick={handleDeleteByYear}
+                disabled={deleteByYearMutation.isPending}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleteByYearMutation.isPending
+                  ? "Deleting..."
+                  : `Delete ${selectedDeleteYear} Transactions`}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Edit / Add Dialog */}
         <Dialog

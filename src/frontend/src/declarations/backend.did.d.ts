@@ -80,9 +80,11 @@ export type UserRole = { 'admin' : null } |
 export interface _SERVICE {
   '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
   'addTransaction' : ActorMethod<[Transaction], bigint>,
+  'addTransactions' : ActorMethod<[Array<Transaction>], Array<bigint>>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'deleteIntegration' : ActorMethod<[string], undefined>,
   'deleteTransaction' : ActorMethod<[bigint], undefined>,
+  'deleteTransactionsByYear' : ActorMethod<[bigint], bigint>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getHarvestCandidates' : ActorMethod<[], Array<HarvestCandidate>>,

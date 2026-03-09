@@ -81,9 +81,11 @@ export const TaxSummary = IDL.Record({
 export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
   'addTransaction' : IDL.Func([Transaction], [IDL.Nat], []),
+  'addTransactions' : IDL.Func([IDL.Vec(Transaction)], [IDL.Vec(IDL.Nat)], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
   'deleteIntegration' : IDL.Func([IDL.Text], [], []),
   'deleteTransaction' : IDL.Func([IDL.Nat], [], []),
+  'deleteTransactionsByYear' : IDL.Func([IDL.Nat], [IDL.Nat], []),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getHarvestCandidates' : IDL.Func([], [IDL.Vec(HarvestCandidate)], ['query']),
@@ -180,9 +182,15 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
     'addTransaction' : IDL.Func([Transaction], [IDL.Nat], []),
+    'addTransactions' : IDL.Func(
+        [IDL.Vec(Transaction)],
+        [IDL.Vec(IDL.Nat)],
+        [],
+      ),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
     'deleteIntegration' : IDL.Func([IDL.Text], [], []),
     'deleteTransaction' : IDL.Func([IDL.Nat], [], []),
+    'deleteTransactionsByYear' : IDL.Func([IDL.Nat], [IDL.Nat], []),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getHarvestCandidates' : IDL.Func(

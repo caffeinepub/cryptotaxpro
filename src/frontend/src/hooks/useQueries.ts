@@ -67,6 +67,19 @@ export function useAddTransaction() {
   });
 }
 
+export function useAddTransactions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (txs: Transaction[]) => {
+      const actorInstance = await waitForActor(queryClient);
+      return actorInstance.addTransactions(txs);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+}
+
 export function useUpdateTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -86,6 +99,19 @@ export function useDeleteTransaction() {
     mutationFn: async (id: bigint) => {
       const actorInstance = await waitForActor(queryClient);
       return actorInstance.deleteTransaction(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+}
+
+export function useDeleteTransactionsByYear() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (year: number) => {
+      const actorInstance = await waitForActor(queryClient);
+      return actorInstance.deleteTransactionsByYear(BigInt(year));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });

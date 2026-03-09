@@ -8,13 +8,14 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
-
+import Char "mo:core/Char";
 
 import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
+import Migration "migration";
 
 // Data migration on upgrade
-
+(with migration = Migration.run)
 actor {
   // Data Types
   type UserProfile = {
@@ -114,6 +115,7 @@ actor {
 
   // Authorization System
   let accessControlState = AccessControl.initState();
+
   include MixinAuthorization(accessControlState);
 
   // Profile Management
@@ -204,6 +206,50 @@ actor {
     newTransaction.id;
   };
 
+  public shared ({ caller }) func addTransactions(transactions_ : [Transaction]) : async [Nat] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can modify their transactions");
+    };
+
+    let transactions = switch (userTransactions.get(caller)) {
+      case (null) { List.empty<Transaction>() };
+      case (?txs) { txs };
+    };
+
+    let newIds = Array.tabulate(
+      transactions_.size(),
+      func(i) { nextTransactionId + i },
+    );
+
+    let iter = transactions_.values();
+    let zippedIter = iter.zip(newIds.values());
+
+    zippedIter.forEach(func((transaction, id)) {
+      let newTransaction = {
+        id;
+        date = transaction.date;
+        txType = transaction.txType;
+        asset = transaction.asset;
+        assetName = transaction.assetName;
+        amount = transaction.amount;
+        priceUSD = transaction.priceUSD;
+        costBasisUSD = transaction.costBasisUSD;
+        gainLossUSD = transaction.gainLossUSD;
+        isShortTerm = transaction.isShortTerm;
+        tags = transaction.tags;
+        isFlagged = transaction.isFlagged;
+        flagReason = transaction.flagReason;
+        exchange = transaction.exchange;
+        notes = transaction.notes;
+      };
+      transactions.add(newTransaction);
+    });
+
+    nextTransactionId += transactions_.size();
+    userTransactions.add(caller, transactions);
+    newIds;
+  };
+
   public shared ({ caller }) func updateTransaction(updated : Transaction) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can modify their transactions");
@@ -241,6 +287,35 @@ actor {
 
     let filtered = transactions.filter(func(t) { t.id != id });
     userTransactions.add(caller, filtered);
+  };
+
+  // New function: Delete transactions by year
+  public shared ({ caller }) func deleteTransactionsByYear(year : Nat) : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can delete their own transactions");
+    };
+
+    // Convert year to string
+    let yearText = year.toText();
+    // Get transactions for caller (if any)
+    let transactions = switch (userTransactions.get(caller)) {
+      case (null) { List.empty<Transaction>() };
+      case (?transactions) { transactions };
+    };
+
+    // Iterate through all transactions and filter out those that match the year
+    var deletedCount = 0;
+    let filtered = transactions.filter(
+      func(transaction) {
+        let shouldKeep = not transaction.date.startsWith(#text yearText);
+        if (not shouldKeep) { deletedCount += 1 };
+        shouldKeep;
+      }
+    );
+
+    // Keep filtered transactions (might be empty)
+    userTransactions.add(caller, filtered);
+    deletedCount;
   };
 
   // Portfolio Management
