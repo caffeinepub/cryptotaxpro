@@ -12,6 +12,7 @@ import { AuthGuard } from "./components/AuthGuard";
 import { Dashboard } from "./pages/Dashboard";
 import { Harvesting } from "./pages/Harvesting";
 import { Login } from "./pages/Login";
+import { Metrics } from "./pages/Metrics";
 import { Pricing } from "./pages/Pricing";
 import { Settings } from "./pages/Settings";
 import { TaxReports } from "./pages/TaxReports";
@@ -100,6 +101,12 @@ const settingsRoute = createRoute({
   component: Settings,
 });
 
+const metricsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "/metrics",
+  component: Metrics,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   authGuardRoute.addChildren([
@@ -111,6 +118,7 @@ const routeTree = rootRoute.addChildren([
       harvestingRoute,
       pricingRoute,
       settingsRoute,
+      metricsRoute,
     ]),
   ]),
 ]);

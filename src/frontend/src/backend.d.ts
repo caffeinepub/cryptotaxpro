@@ -80,6 +80,7 @@ export interface backendInterface {
     addTransaction(transaction: Transaction): Promise<bigint>;
     addTransactions(transactions: Array<Transaction>): Promise<Array<bigint>>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    clearAllTransactions(): Promise<void>;
     deleteIntegration(id: string): Promise<void>;
     deleteTransaction(id: bigint): Promise<void>;
     deleteTransactionsByYear(year: bigint): Promise<bigint>;

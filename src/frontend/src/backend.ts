@@ -163,6 +163,7 @@ export interface backendInterface {
     addTransaction(transaction: Transaction): Promise<bigint>;
     addTransactions(transactions: Array<Transaction>): Promise<Array<bigint>>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    clearAllTransactions(): Promise<void>;
     deleteIntegration(id: string): Promise<void>;
     deleteTransaction(id: bigint): Promise<void>;
     deleteTransactionsByYear(year: bigint): Promise<bigint>;
@@ -237,6 +238,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.assignCallerUserRole(arg0, to_candid_UserRole_n1(this._uploadFile, this._downloadFile, arg1));
+            return result;
+        }
+    }
+    async clearAllTransactions(): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.clearAllTransactions();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.clearAllTransactions();
             return result;
         }
     }

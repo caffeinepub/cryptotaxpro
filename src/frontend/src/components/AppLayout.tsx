@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
+  Activity,
   ArrowLeftRight,
   ChevronRight,
   CreditCard,
@@ -53,6 +54,12 @@ const navItems = [
     label: "Settings",
     icon: Settings,
     ocid: "nav.settings.link",
+  },
+  {
+    path: "/metrics",
+    label: "Metrics",
+    icon: Activity,
+    ocid: "nav.metrics.link",
   },
 ];
 

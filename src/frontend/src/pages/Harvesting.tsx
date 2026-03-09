@@ -26,11 +26,17 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import type { HarvestCandidate } from "../backend.d";
-import { useHarvestCandidates } from "../hooks/useQueries";
+import { useLivePrices } from "../hooks/useLivePrices";
+import { useHarvestCandidates, useTransactions } from "../hooks/useQueries";
 import { formatCurrency, formatNumber } from "../utils/format";
 
 export function Harvesting() {
-  const { data: candidates, isLoading } = useHarvestCandidates();
+  const { data: transactions } = useTransactions();
+  const heldSymbols = [
+    ...new Set((transactions ?? []).map((tx) => tx.asset.toUpperCase())),
+  ];
+  const { prices: livePrices } = useLivePrices(heldSymbols);
+  const { data: candidates, isLoading } = useHarvestCandidates(livePrices);
   const [simulatingItem, setSimulatingItem] = useState<HarvestCandidate | null>(
     null,
   );

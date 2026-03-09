@@ -1,23 +1,22 @@
-import Map "mo:core/Map";
 import Array "mo:core/Array";
-import Iter "mo:core/Iter";
-import List "mo:core/List";
+import Map "mo:core/Map";
 import Float "mo:core/Float";
 import Order "mo:core/Order";
+import Iter "mo:core/Iter";
+import List "mo:core/List";
+import Time "mo:core/Time";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
-import Time "mo:core/Time";
 import Char "mo:core/Char";
 
-import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
-import Migration "migration";
+import MixinAuthorization "authorization/MixinAuthorization";
 
-// Data migration on upgrade
-(with migration = Migration.run)
+
+
 actor {
-  // Data Types
+  // Types
   type UserProfile = {
     country : Text;
     currency : Text;
@@ -107,38 +106,72 @@ actor {
     connectedAt : Int;
   };
 
-  // State
-  let userProfiles = Map.empty<Principal, UserProfile>();
-  let userTransactions = Map.empty<Principal, List.List<Transaction>>();
-  let userIntegrations = Map.empty<Principal, List.List<IntegrationConnection>>();
-  var nextTransactionId = 1;
+  stable var stableProfiles : [(Principal, UserProfile)] = [];
+  stable var stableTransactions : [(Principal, [Transaction])] = [];
+  stable var stableIntegrations : [(Principal, [IntegrationConnection])] = [];
+  stable var nextTransactionId = 1;
+
+  // Helper functions for state access
+  func getProfile(p : Principal) : ?UserProfile {
+    switch (stableProfiles.find(func((principal, _)) { principal == p })) {
+      case (null) { null };
+      case (?(_, profile)) { ?profile };
+    };
+  };
+
+  func setProfile(p : Principal, profile : UserProfile) {
+    let filtered = stableProfiles.filter(func((principal, _)) { principal != p });
+    stableProfiles := filtered.concat([(p, profile)]);
+  };
+
+  func getTransactionsFor(principal : Principal) : [Transaction] {
+    switch (stableTransactions.find(func((p, _)) { p == principal })) {
+      case (null) { [] };
+      case (?(_, transactions)) { transactions };
+    };
+  };
+
+  func setTransactions(p : Principal, transactions : [Transaction]) {
+    let filtered = stableTransactions.filter(func((principal, _)) { principal != p });
+    stableTransactions := filtered.concat([(p, transactions)]);
+  };
+
+  func getIntegrationsFor(principal : Principal) : [IntegrationConnection] {
+    switch (stableIntegrations.find(func((p, _)) { p == principal })) {
+      case (null) { [] };
+      case (?(_, integrations)) { integrations };
+    };
+  };
+
+  func setIntegrations(p : Principal, integrations : [IntegrationConnection]) {
+    let filtered = stableIntegrations.filter(func((principal, _)) { principal != p });
+    stableIntegrations := filtered.concat([(p, integrations)]);
+  };
 
   // Authorization System
   let accessControlState = AccessControl.initState();
-
   include MixinAuthorization(accessControlState);
 
   // Profile Management
   public query ({ caller }) func getUserProfile(user : Principal) : async ?UserProfile {
-    if (caller != user and not AccessControl.isAdmin(accessControlState, caller)) {
+    if (not (AccessControl.isAdmin(accessControlState, caller)) and caller != user) {
       Runtime.trap("Unauthorized: Only admin can access another user's profile");
     };
-
-    userProfiles.get(user);
+    getProfile(user);
   };
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can save profiles");
     };
-    userProfiles.get(caller);
+    getProfile(caller);
   };
 
   public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can save profiles");
     };
-    userProfiles.add(caller, profile);
+    setProfile(caller, profile);
   };
 
   // Transaction Management
@@ -146,11 +179,7 @@ actor {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can fetch their transactions");
     };
-
-    switch (userTransactions.get(caller)) {
-      case (null) { [] };
-      case (?transactions) { transactions.toArray().sort() };
-    };
+    getTransactionsFor(caller).sort();
   };
 
   public query ({ caller }) func getTransaction(id : Nat) : async Transaction {
@@ -158,15 +187,9 @@ actor {
       Runtime.trap("Unauthorized: Only users can fetch their transactions");
     };
 
-    switch (userTransactions.get(caller)) {
-      case (null) { Runtime.trap("No transactions found for caller") };
-      case (?transactions) {
-        let iter = transactions.values();
-        switch (iter.find(func(t) { t.id == id })) {
-          case (null) { Runtime.trap("Transaction not found") };
-          case (?transaction) { transaction };
-        };
-      };
+    switch (getTransactionsFor(caller).find(func(t) { t.id == id })) {
+      case (null) { Runtime.trap("Transaction not found") };
+      case (?transaction) { transaction };
     };
   };
 
@@ -175,7 +198,6 @@ actor {
       Runtime.trap("Unauthorized: Only users can modify their transactions");
     };
 
-    // Assign unique ID
     let newTransaction = {
       id = nextTransactionId;
       date = transaction.date;
@@ -193,16 +215,11 @@ actor {
       exchange = transaction.exchange;
       notes = transaction.notes;
     };
+
+    let transactions = getTransactionsFor(caller).concat([newTransaction]);
+    setTransactions(caller, transactions);
+
     nextTransactionId += 1;
-
-    // Update transactions
-    let transactions = switch (userTransactions.get(caller)) {
-      case (null) { List.empty<Transaction>() };
-      case (?transactions) { transactions };
-    };
-    transactions.add(newTransaction);
-
-    userTransactions.add(caller, transactions);
     newTransaction.id;
   };
 
@@ -211,42 +228,40 @@ actor {
       Runtime.trap("Unauthorized: Only users can modify their transactions");
     };
 
-    let transactions = switch (userTransactions.get(caller)) {
-      case (null) { List.empty<Transaction>() };
-      case (?txs) { txs };
-    };
-
     let newIds = Array.tabulate(
       transactions_.size(),
       func(i) { nextTransactionId + i },
     );
 
-    let iter = transactions_.values();
-    let zippedIter = iter.zip(newIds.values());
+    let newTransactions = Array.tabulate(
+      transactions_.size(),
+      func(i) {
+        let transaction = transactions_[i];
+        {
+          id = newIds[i];
+          date = transaction.date;
+          txType = transaction.txType;
+          asset = transaction.asset;
+          assetName = transaction.assetName;
+          amount = transaction.amount;
+          priceUSD = transaction.priceUSD;
+          costBasisUSD = transaction.costBasisUSD;
+          gainLossUSD = transaction.gainLossUSD;
+          isShortTerm = transaction.isShortTerm;
+          tags = transaction.tags;
+          isFlagged = transaction.isFlagged;
+          flagReason = transaction.flagReason;
+          exchange = transaction.exchange;
+          notes = transaction.notes;
+        };
+      },
+    );
 
-    zippedIter.forEach(func((transaction, id)) {
-      let newTransaction = {
-        id;
-        date = transaction.date;
-        txType = transaction.txType;
-        asset = transaction.asset;
-        assetName = transaction.assetName;
-        amount = transaction.amount;
-        priceUSD = transaction.priceUSD;
-        costBasisUSD = transaction.costBasisUSD;
-        gainLossUSD = transaction.gainLossUSD;
-        isShortTerm = transaction.isShortTerm;
-        tags = transaction.tags;
-        isFlagged = transaction.isFlagged;
-        flagReason = transaction.flagReason;
-        exchange = transaction.exchange;
-        notes = transaction.notes;
-      };
-      transactions.add(newTransaction);
-    });
+    let currentTransactions = getTransactionsFor(caller);
+    let allTransactions = currentTransactions.concat(newTransactions);
+    setTransactions(caller, allTransactions);
 
     nextTransactionId += transactions_.size();
-    userTransactions.add(caller, transactions);
     newIds;
   };
 
@@ -255,24 +270,17 @@ actor {
       Runtime.trap("Unauthorized: Only users can modify their transactions");
     };
 
-    let transactions = switch (userTransactions.get(caller)) {
-      case (null) { Runtime.trap("Transaction not found") };
-      case (?transactions) { transactions };
+    let transactions = getTransactionsFor(caller);
+    if (transactions.find(func(t) { t.id == updated.id }) == null) {
+      Runtime.trap("Transaction not found");
     };
 
-    let found = switch (transactions.values().find(func(t) { t.id == updated.id })) {
-      case (null) { Runtime.trap("Transaction not found") };
-      case (?_) { true };
-    };
-
-    if (found) {
-      let updatedTransactions = transactions.map<Transaction, Transaction>(
-        func(t) {
-          if (t.id == updated.id) { updated } else { t };
-        }
-      );
-      userTransactions.add(caller, updatedTransactions);
-    };
+    let updatedTransactions = transactions.map(
+      func(t) {
+        if (t.id == updated.id) { updated } else { t };
+      }
+    );
+    setTransactions(caller, updatedTransactions);
   };
 
   public shared ({ caller }) func deleteTransaction(id : Nat) : async () {
@@ -280,30 +288,19 @@ actor {
       Runtime.trap("Unauthorized: Only users can delete their own transactions");
     };
 
-    let transactions = switch (userTransactions.get(caller)) {
-      case (null) { List.empty<Transaction>() };
-      case (?transactions) { transactions };
-    };
-
+    let transactions = getTransactionsFor(caller);
     let filtered = transactions.filter(func(t) { t.id != id });
-    userTransactions.add(caller, filtered);
+    setTransactions(caller, filtered);
   };
 
-  // New function: Delete transactions by year
   public shared ({ caller }) func deleteTransactionsByYear(year : Nat) : async Nat {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can delete their own transactions");
     };
 
-    // Convert year to string
     let yearText = year.toText();
-    // Get transactions for caller (if any)
-    let transactions = switch (userTransactions.get(caller)) {
-      case (null) { List.empty<Transaction>() };
-      case (?transactions) { transactions };
-    };
+    let transactions = getTransactionsFor(caller);
 
-    // Iterate through all transactions and filter out those that match the year
     var deletedCount = 0;
     let filtered = transactions.filter(
       func(transaction) {
@@ -313,9 +310,15 @@ actor {
       }
     );
 
-    // Keep filtered transactions (might be empty)
-    userTransactions.add(caller, filtered);
+    setTransactions(caller, filtered);
     deletedCount;
+  };
+
+  public shared ({ caller }) func clearAllTransactions() : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can clear their transactions");
+    };
+    setTransactions(caller, []);
   };
 
   // Portfolio Management
@@ -323,23 +326,18 @@ actor {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can access their portfolio");
     };
-
-    // Return empty holdings and zeroed values per requirements
-    let summary : PortfolioSummary = {
+    {
       holdings = [];
       totalValue = 0.0;
       totalUnrealizedGain = 0.0;
     };
-    summary;
   };
 
   public query ({ caller }) func getTaxSummary(year : Nat) : async TaxSummary {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can access their tax summaries");
     };
-
-    // Return zeros for all fields per requirements
-    let summary : TaxSummary = {
+    {
       taxYear = year;
       shortTermGains = 0.0;
       longTermGains = 0.0;
@@ -348,65 +346,40 @@ actor {
       netGains = 0.0;
       estimatedTax = 0.0;
     };
-    summary;
   };
 
   public query ({ caller }) func getHarvestCandidates() : async [HarvestCandidate] {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can access their harvest candidates");
     };
-
-    // Return empty array per requirements
     [];
   };
 
   // Integration Management
   public shared ({ caller }) func saveIntegration(connection : IntegrationConnection) : async () {
-    // Authorization check
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can manage integrations");
     };
 
-    let connections = switch (userIntegrations.get(caller)) {
-      case (null) { List.empty<IntegrationConnection>() };
-      case (?connections) { connections };
-    };
-
-    // Remove existing integration with same id if present
-    let filtered = connections.filter(func(con) { con.id != connection.id });
-
-    // Add new/updated integration to front
-    filtered.add(connection);
-    userIntegrations.add(caller, filtered);
+    let current = getIntegrationsFor(caller);
+    let filtered = current.filter(func(con) { con.id != connection.id });
+    let updated = filtered.concat([connection]);
+    setIntegrations(caller, updated);
   };
 
   public query ({ caller }) func getIntegrations() : async [IntegrationConnection] {
-    // Authorization check
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can fetch integrations");
     };
-
-    let connections = switch (userIntegrations.get(caller)) {
-      case (null) { List.empty<IntegrationConnection>() };
-      case (?connections) { connections };
-    };
-
-    connections.toArray();
+    getIntegrationsFor(caller);
   };
 
   public shared ({ caller }) func deleteIntegration(id : Text) : async () {
-    // Authorization check
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can manage integrations");
     };
-
-    let connections = switch (userIntegrations.get(caller)) {
-      case (null) { List.empty<IntegrationConnection>() };
-      case (?connections) { connections };
-    };
-
-    let filtered = connections.filter(func(con) { con.id != id });
-    userIntegrations.add(caller, filtered);
+    let filtered = getIntegrationsFor(caller).filter(func(con) { con.id != id });
+    setIntegrations(caller, filtered);
   };
 
   // Plan Management
@@ -414,19 +387,6 @@ actor {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can upgrade their plan");
     };
-
-    switch (userProfiles.get(caller)) {
-      case (null) { Runtime.trap("User not found") };
-      case (?profile) {
-        let updated : UserProfile = {
-          country = profile.country;
-          currency = profile.currency;
-          costBasisMethod = profile.costBasisMethod;
-          taxYear = profile.taxYear;
-          plan = newPlan;
-        };
-        userProfiles.add(caller, updated);
-      };
-    };
   };
 };
+

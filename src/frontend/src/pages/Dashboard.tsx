@@ -20,8 +20,10 @@ import {
   AlertTriangle,
   ArrowUpRight,
   DollarSign,
+  RefreshCw,
   TrendingDown,
   TrendingUp,
+  WifiOff,
 } from "lucide-react";
 import { useState } from "react";
 import {
@@ -34,6 +36,7 @@ import {
 } from "recharts";
 import { StatCard } from "../components/StatCard";
 import { TxTypeBadge } from "../components/TxTypeBadge";
+import { useLivePrices } from "../hooks/useLivePrices";
 import {
   usePortfolioSummary,
   useTaxSummary,
@@ -59,14 +62,32 @@ const CHART_COLORS = [
 
 export function Dashboard() {
   const [taxYear, setTaxYear] = useState("2025");
+
+  // Derive asset symbols from transactions first (needed for price fetch)
+  const { data: transactions, isLoading: txLoading } = useTransactions();
+
+  // Collect unique asset symbols from transactions
+  const heldSymbols = [
+    ...new Set((transactions ?? []).map((tx) => tx.asset.toUpperCase())),
+  ];
+
+  // Fetch live prices for all held assets, auto-refresh every 60s
+  const {
+    prices: livePrices,
+    isLoading: pricesLoading,
+    error: pricesError,
+    lastUpdated,
+  } = useLivePrices(heldSymbols);
+
   const { data: portfolio, isLoading: portfolioLoading } =
-    usePortfolioSummary();
+    usePortfolioSummary(livePrices);
   const { data: taxSummary, isLoading: taxLoading } = useTaxSummary(
     BigInt(Number(taxYear)),
   );
-  const { data: transactions, isLoading: txLoading } = useTransactions();
 
-  const recentTxs = (transactions ?? []).slice(0, 6);
+  const recentTxs = [...(transactions ?? [])]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 6);
 
   const pieData = (portfolio?.holdings ?? []).map((h) => ({
     name: h.asset,
@@ -77,6 +98,14 @@ export function Dashboard() {
   const totalValue = portfolio?.totalValue ?? 0;
   const totalUnrealized = portfolio?.totalUnrealizedGain ?? 0;
 
+  const priceStatusLabel = pricesLoading
+    ? "Fetching prices..."
+    : pricesError
+      ? "Using last known prices"
+      : lastUpdated
+        ? `Prices updated ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : null;
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -85,9 +114,32 @@ export function Dashboard() {
           <h1 className="text-2xl font-bold font-display text-foreground">
             Portfolio Dashboard
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Real-time overview of your crypto holdings and tax position
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-sm text-muted-foreground">
+              Real-time overview of your crypto holdings and tax position
+            </p>
+            {priceStatusLabel && (
+              <span
+                className={cn(
+                  "flex items-center gap-1 text-xs",
+                  pricesError
+                    ? "text-yellow-500"
+                    : pricesLoading
+                      ? "text-muted-foreground"
+                      : "text-emerald-500",
+                )}
+              >
+                {pricesError ? (
+                  <WifiOff className="w-3 h-3" />
+                ) : (
+                  <RefreshCw
+                    className={cn("w-3 h-3", pricesLoading && "animate-spin")}
+                  />
+                )}
+                {priceStatusLabel}
+              </span>
+            )}
+          </div>
         </div>
         <Select value={taxYear} onValueChange={setTaxYear}>
           <SelectTrigger
@@ -117,9 +169,13 @@ export function Dashboard() {
         <StatCard
           label="Unrealized Gain/Loss"
           value={formatCurrency(totalUnrealized, true)}
-          subValue={formatPct(
-            (totalUnrealized / (totalValue - totalUnrealized)) * 100,
-          )}
+          subValue={
+            totalValue - totalUnrealized > 0
+              ? formatPct(
+                  (totalUnrealized / (totalValue - totalUnrealized)) * 100,
+                )
+              : "—"
+          }
           icon={totalUnrealized >= 0 ? TrendingUp : TrendingDown}
           trend={totalUnrealized >= 0 ? "up" : "down"}
           isLoading={portfolioLoading}
@@ -208,8 +264,14 @@ export function Dashboard() {
 
         {/* Holdings Table */}
         <div className="lg:col-span-3 rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Holdings</h2>
+            {pricesError && (
+              <span className="flex items-center gap-1 text-xs text-yellow-500">
+                <WifiOff className="w-3 h-3" />
+                Prices unavailable — using last known
+              </span>
+            )}
           </div>
           <div className="overflow-x-auto">
             <Table>
@@ -259,49 +321,69 @@ export function Dashboard() {
                         </TableCell>
                       </TableRow>
                     ))
-                  : (portfolio?.holdings ?? []).map((holding) => (
-                      <TableRow
-                        key={holding.asset}
-                        className="border-border table-row-hover"
-                      >
-                        <TableCell className="py-2">
-                          <div>
-                            <span className="text-sm font-semibold text-foreground">
-                              {holding.asset}
+                  : (portfolio?.holdings ?? []).map((holding) => {
+                      const isLive =
+                        livePrices[holding.asset.toUpperCase()] != null;
+                      return (
+                        <TableRow
+                          key={holding.asset}
+                          className="border-border table-row-hover"
+                        >
+                          <TableCell className="py-2">
+                            <div>
+                              <span className="text-sm font-semibold text-foreground">
+                                {holding.asset}
+                              </span>
+                              <p className="text-xs text-muted-foreground">
+                                {holding.assetName}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 text-right mono text-xs text-muted-foreground">
+                            {formatNumber(holding.amount, 4)}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-xs text-foreground mono">
+                            <span
+                              title={
+                                isLive
+                                  ? "Live market price"
+                                  : "Last known price from transactions"
+                              }
+                            >
+                              {formatCurrency(holding.currentPriceUSD)}
                             </span>
-                            <p className="text-xs text-muted-foreground">
-                              {holding.assetName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-2 text-right mono text-xs text-muted-foreground">
-                          {formatNumber(holding.amount, 4)}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-xs text-foreground mono">
-                          {formatCurrency(holding.currentPriceUSD)}
-                        </TableCell>
-                        <TableCell className="py-2 text-right text-xs font-semibold text-foreground">
-                          {formatCurrency(holding.currentValueUSD)}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "py-2 text-right text-xs font-medium mono",
-                            gainLossClass(holding.unrealizedGainLoss),
-                          )}
-                        >
-                          {holding.unrealizedGainLoss >= 0 ? "+" : ""}
-                          {formatCurrency(holding.unrealizedGainLoss)}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "py-2 text-right text-xs font-medium",
-                            gainLossClass(holding.unrealizedPct),
-                          )}
-                        >
-                          {formatPct(holding.unrealizedPct)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            {!isLive && (
+                              <span
+                                className="ml-1 text-yellow-500 text-xs"
+                                title="Using last known price"
+                              >
+                                ~
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-2 text-right text-xs font-semibold text-foreground">
+                            {formatCurrency(holding.currentValueUSD)}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "py-2 text-right text-xs font-medium mono",
+                              gainLossClass(holding.unrealizedGainLoss),
+                            )}
+                          >
+                            {holding.unrealizedGainLoss >= 0 ? "+" : ""}
+                            {formatCurrency(holding.unrealizedGainLoss)}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "py-2 text-right text-xs font-medium",
+                              gainLossClass(holding.unrealizedPct),
+                            )}
+                          >
+                            {formatPct(holding.unrealizedPct)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
               </TableBody>
             </Table>
           </div>

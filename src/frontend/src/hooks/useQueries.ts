@@ -146,22 +146,42 @@ function accumulateHoldings(
     }
     const acc = map.get(key)!;
 
-    // Track latest price
+    // Track latest price; derive from cost basis if priceUSD not set
     if (tx.priceUSD > 0) {
       acc.lastPriceUSD = tx.priceUSD;
+    } else if (tx.costBasisUSD > 0 && tx.amount > 0) {
+      acc.lastPriceUSD = tx.costBasisUSD / tx.amount;
     }
     acc.assetName = tx.assetName || acc.assetName;
 
     const type = tx.txType.toLowerCase();
-    if (type === "trade" || type === "sell" || type === "nft") {
+    const tags = tx.tags ?? [];
+    const isSell =
+      type === "sell" ||
+      (type === "trade" && tags.includes("sell")) ||
+      (type === "trade" && tags.includes("convert") && !tags.includes("buy"));
+    const isBuy =
+      type === "buy" ||
+      (type === "trade" && (tags.includes("buy") || tags.includes("convert")));
+    const isNeutral = type === "transfer";
+
+    if (isSell || type === "nft") {
       // Selling / disposing reduces holding
       acc.netAmount -= tx.amount;
-    } else if (type === "transfer") {
-      // Neutral — own wallet move
-    } else {
-      // Buy, Staking, Airdrop, Mining, DeFi, etc. — adds to holding
+    } else if (isNeutral) {
+      // Own wallet move — neutral
+    } else if (
+      isBuy ||
+      type === "staking" ||
+      type === "airdrop" ||
+      type === "mining" ||
+      type === "defi" ||
+      type === "trade"
+    ) {
+      // Buy, Staking, Airdrop, Mining, DeFi, generic Trade — adds to holding
       acc.netAmount += tx.amount;
-      acc.totalCostBasis += tx.costBasisUSD * tx.amount;
+      // costBasisUSD is the total cost for this transaction (not per-unit)
+      acc.totalCostBasis += tx.costBasisUSD;
     }
   }
 
@@ -169,9 +189,11 @@ function accumulateHoldings(
 }
 
 // ──────────────────────────────────────────────
-// Portfolio — computed from transactions
+// Portfolio — computed from transactions + live prices
+// livePrices: symbol (uppercase) → current USD price from CoinGecko
+// Falls back to last known tx price, then cost basis per unit
 // ──────────────────────────────────────────────
-export function usePortfolioSummary(): {
+export function usePortfolioSummary(livePrices: Record<string, number> = {}): {
   data: PortfolioSummary;
   isLoading: boolean;
 } {
@@ -188,11 +210,20 @@ export function usePortfolioSummary(): {
     for (const [asset, acc] of map.entries()) {
       if (acc.netAmount < 0.001) continue;
 
-      const currentPriceUSD = acc.lastPriceUSD;
-      const currentValueUSD = acc.netAmount * currentPriceUSD;
       const costBasisPerUnit =
         acc.netAmount > 0 ? acc.totalCostBasis / acc.netAmount : 0;
-      const totalCost = costBasisPerUnit * acc.netAmount;
+
+      // Priority: 1) live market price, 2) last known tx price, 3) cost basis per unit
+      const livePrice = livePrices[asset.toUpperCase()];
+      const currentPriceUSD =
+        livePrice != null && livePrice > 0
+          ? livePrice
+          : acc.lastPriceUSD > 0
+            ? acc.lastPriceUSD
+            : costBasisPerUnit;
+
+      const currentValueUSD = acc.netAmount * currentPriceUSD;
+      const totalCost = acc.totalCostBasis;
       const unrealizedGainLoss = currentValueUSD - totalCost;
       const unrealizedPct =
         totalCost > 0 ? (unrealizedGainLoss / totalCost) * 100 : 0;
@@ -216,7 +247,7 @@ export function usePortfolioSummary(): {
     );
 
     return { holdings, totalValue, totalUnrealizedGain };
-  }, [transactions]);
+  }, [transactions, livePrices]);
 
   return { data, isLoading };
 }
@@ -290,9 +321,9 @@ export function useTaxSummary(year: bigint): {
 }
 
 // ──────────────────────────────────────────────
-// Harvest Candidates — computed from transactions
+// Harvest Candidates — computed from transactions + live prices
 // ──────────────────────────────────────────────
-export function useHarvestCandidates(): {
+export function useHarvestCandidates(livePrices: Record<string, number> = {}): {
   data: HarvestCandidate[];
   isLoading: boolean;
 } {
@@ -307,11 +338,19 @@ export function useHarvestCandidates(): {
     for (const [asset, acc] of map.entries()) {
       if (acc.netAmount < 0.001) continue;
 
-      const currentPrice = acc.lastPriceUSD;
-      const currentValue = acc.netAmount * currentPrice;
       const costBasisPerUnit =
         acc.netAmount > 0 ? acc.totalCostBasis / acc.netAmount : 0;
-      const totalCost = costBasisPerUnit * acc.netAmount;
+
+      const livePrice = livePrices[asset.toUpperCase()];
+      const currentPrice =
+        livePrice != null && livePrice > 0
+          ? livePrice
+          : acc.lastPriceUSD > 0
+            ? acc.lastPriceUSD
+            : costBasisPerUnit;
+
+      const currentValue = acc.netAmount * currentPrice;
+      const totalCost = acc.totalCostBasis;
       const unrealizedGainLoss = currentValue - totalCost;
 
       if (unrealizedGainLoss < 0) {
@@ -327,7 +366,7 @@ export function useHarvestCandidates(): {
     }
 
     return candidates;
-  }, [transactions]);
+  }, [transactions, livePrices]);
 
   return { data, isLoading };
 }

@@ -185,9 +185,11 @@ function mapCoinbaseTxType(raw: string): { txType: string; tags: string[] } {
   if (v === "rewards income" || v === "staking income")
     return { txType: "Staking", tags: [] };
   if (v === "send") return { txType: "Transfer", tags: ["send"] };
-  if (v === "receive") return { txType: "Transfer", tags: ["receive"] };
-  if (v === "convert" || v === "converted from" || v === "converted to")
-    return { txType: "Trade", tags: ["convert"] };
+  if (v === "receive") return { txType: "Trade", tags: ["buy"] };
+  if (v === "converted to")
+    return { txType: "Trade", tags: ["buy", "convert"] };
+  if (v === "convert" || v === "converted from")
+    return { txType: "Trade", tags: ["sell", "convert"] };
   if (v === "stake") return { txType: "Staking", tags: ["stake"] };
   if (v === "unstake") return { txType: "Transfer", tags: ["unstake"] };
   return { txType: "Trade", tags: [] };

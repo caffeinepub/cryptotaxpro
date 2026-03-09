@@ -82,6 +82,7 @@ export interface _SERVICE {
   'addTransaction' : ActorMethod<[Transaction], bigint>,
   'addTransactions' : ActorMethod<[Array<Transaction>], Array<bigint>>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'clearAllTransactions' : ActorMethod<[], undefined>,
   'deleteIntegration' : ActorMethod<[string], undefined>,
   'deleteTransaction' : ActorMethod<[bigint], undefined>,
   'deleteTransactionsByYear' : ActorMethod<[bigint], bigint>,
