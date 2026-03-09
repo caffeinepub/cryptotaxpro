@@ -15,23 +15,25 @@ import { useActor } from "./useActor";
 // ──────────────────────────────────────────────
 // Helper: wait for actor from React Query cache (handles race condition
 // where hook closure captures a stale null actor on first render)
-// Polls the cache until actor is available or times out after 8s.
+// Uses queryCache.findAll with prefix matching to check state.data directly,
+// which is reliably populated on success even when getQueriesData returns undefined.
 // ──────────────────────────────────────────────
 export async function waitForActor(
   queryClient: ReturnType<typeof useQueryClient>,
-  timeoutMs = 8000,
+  timeoutMs = 10000,
 ): Promise<backendInterface> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const queries = queryClient.getQueriesData<backendInterface>({
-      queryKey: ["actor"],
-    });
-    for (const [, data] of queries) {
-      if (data) return data;
+    const cache = queryClient.getQueryCache();
+    const queries = cache.findAll({ queryKey: ["actor"], exact: false });
+    for (const query of queries) {
+      if (query.state.status === "success" && query.state.data) {
+        return query.state.data as backendInterface;
+      }
     }
-    // Wait 100ms before retrying
-    await new Promise((r) => setTimeout(r, 100));
+    // Poll every 50ms for faster response
+    await new Promise((r) => setTimeout(r, 50));
   }
 
   throw new Error("Not connected to backend. Please refresh the page.");
