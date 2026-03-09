@@ -67,8 +67,11 @@ import {
 // CSV Import Dialog
 // ──────────────────────────────────────────────
 
-const CSV_COLUMNS =
-  "date, type, asset, assetName, exchange, amount, priceUSD, costBasisUSD, gainLossUSD, notes";
+const SAMPLE_CSV = `date,type,asset,assetName,exchange,amount,priceUSD,costBasisUSD,gainLossUSD,notes
+2025-03-15,Trade,BTC,Bitcoin,Coinbase,0.5,67500,30000,0,Buy BTC
+2025-06-20,Trade,ETH,Ethereum,Kraken,2,3200,5000,1400,Sell ETH
+2025-09-01,Staking,ETH,Ethereum,Lido,0.05,3100,0,155,Staking reward
+`;
 
 interface ParsedRow {
   date: string;
@@ -81,19 +84,285 @@ interface ParsedRow {
   costBasisUSD: number;
   gainLossUSD: number;
   notes: string;
+  tags?: string[];
 }
 
-function parseCSV(text: string): { rows: ParsedRow[]; errors: string[] } {
+/** Parse a single CSV line correctly handling quoted fields with commas inside */
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        // escaped double-quote inside quoted field
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+type DetectedFormat = "coinbase" | "binance" | "kraken" | "gemini" | "generic";
+
+function detectFormat(headers: string[]): DetectedFormat {
+  const h = new Set(headers);
+  if (h.has("quantity transacted") || h.has("spot price at transaction")) {
+    return "coinbase";
+  }
+  if (h.has("utc_time") && h.has("operation") && h.has("coin")) {
+    return "binance";
+  }
+  if (h.has("txid") && h.has("refid") && h.has("aclass")) {
+    return "kraken";
+  }
+  if (h.has("trade id") || (h.has("usd balance") && h.has("specification"))) {
+    return "gemini";
+  }
+  return "generic";
+}
+
+const FORMAT_LABEL: Record<DetectedFormat, string> = {
+  coinbase: "Coinbase",
+  binance: "Binance",
+  kraken: "Kraken",
+  gemini: "Gemini",
+  generic: "Generic",
+};
+
+function mapCoinbaseTxType(raw: string): { txType: string; tags: string[] } {
+  const v = raw.toLowerCase().trim();
+  if (v === "buy") return { txType: "Trade", tags: ["buy"] };
+  if (v === "sell") return { txType: "Trade", tags: ["sell"] };
+  if (v === "rewards income" || v === "staking income")
+    return { txType: "Staking", tags: [] };
+  if (v === "receive" || v === "send") return { txType: "Transfer", tags: [] };
+  if (v === "convert") return { txType: "Trade", tags: [] };
+  return { txType: "Trade", tags: [] };
+}
+
+function mapBinanceTxType(raw: string): string {
+  const v = raw.toLowerCase().trim();
+  if (v === "buy" || v === "spot trading" || v === "small assets exchange bnb")
+    return "Trade";
+  if (v === "staking rewards" || v === "staking purchase") return "Staking";
+  if (v === "deposit" || v === "withdraw") return "Transfer";
+  if (v === "airdrop assets") return "Airdrop";
+  return "Trade";
+}
+
+function mapKrakenTxType(raw: string): string {
+  const v = raw.toLowerCase().trim();
+  if (v === "trade" || v === "spend" || v === "receive") return "Trade";
+  if (v === "staking") return "Staking";
+  if (v === "deposit" || v === "withdrawal") return "Transfer";
+  return "Trade";
+}
+
+function normalizeKrakenAsset(raw: string): string {
+  // Strip legacy X/Z prefix: XXBT→BTC, XETH→ETH, ZUSD→USD
+  const v = raw.toUpperCase();
+  if (v === "XXBT" || v === "XBT") return "BTC";
+  if (v === "XETH") return "ETH";
+  if (/^[XZ][A-Z]{3,}$/.test(v)) return v.slice(1);
+  return v;
+}
+
+function mapGeminiTxType(raw: string): { txType: string; tags: string[] } {
+  const v = raw.toLowerCase().trim();
+  if (v === "buy") return { txType: "Trade", tags: ["buy"] };
+  if (v === "sell") return { txType: "Trade", tags: ["sell"] };
+  if (v === "credit") return { txType: "Airdrop", tags: [] };
+  if (v === "debit") return { txType: "Transfer", tags: [] };
+  return { txType: "Trade", tags: [] };
+}
+
+function extractGeminiAsset(symbol: string): string {
+  // "BTCUSD" → "BTC", strip trailing 3-letter fiat
+  const s = symbol.toUpperCase();
+  const fiat = ["USD", "EUR", "GBP", "SGD", "AUD"];
+  for (const f of fiat) {
+    if (s.endsWith(f) && s.length > f.length) {
+      return s.slice(0, s.length - f.length);
+    }
+  }
+  return s;
+}
+
+function parseCSV(text: string): {
+  rows: ParsedRow[];
+  errors: string[];
+  format: DetectedFormat;
+} {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) {
     return {
       rows: [],
       errors: ["CSV must have a header row and at least one data row."],
+      format: "generic",
     };
   }
 
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const rawHeaders = parseCsvLine(lines[0]);
+  const headers = rawHeaders.map((h) => h.toLowerCase().replace(/['"]/g, ""));
+  const format = detectFormat(headers);
 
+  const colIdx = (name: string) =>
+    headers.findIndex((h) => h === name.toLowerCase());
+
+  const errors: string[] = [];
+  const rows: ParsedRow[] = [];
+
+  if (format === "coinbase") {
+    const iDate = colIdx("timestamp");
+    const iType = colIdx("transaction type");
+    const iAsset = colIdx("asset");
+    const iQty = colIdx("quantity transacted");
+    const iSpot = colIdx("spot price at transaction");
+    const iSubtotal = colIdx("subtotal");
+    const iNotes = colIdx("notes");
+
+    if (iDate === -1 || iAsset === -1 || iQty === -1) {
+      errors.push("Coinbase CSV missing required columns.");
+      return { rows: [], errors, format };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCsvLine(lines[i]);
+      const get = (idx: number) => (idx >= 0 ? (c[idx] ?? "") : "");
+      const { txType, tags } = mapCoinbaseTxType(get(iType));
+      const asset = get(iAsset).toUpperCase();
+      rows.push({
+        date: get(iDate).slice(0, 10),
+        txType,
+        asset,
+        assetName: asset,
+        exchange: "Coinbase",
+        amount: Math.abs(Number.parseFloat(get(iQty)) || 0),
+        priceUSD: Number.parseFloat(get(iSpot)) || 0,
+        costBasisUSD: Math.abs(Number.parseFloat(get(iSubtotal)) || 0),
+        gainLossUSD: 0,
+        notes: get(iNotes),
+        tags,
+      });
+    }
+    return { rows, errors, format };
+  }
+
+  if (format === "binance") {
+    const iDate = colIdx("utc_time");
+    const iOp = colIdx("operation");
+    const iCoin = colIdx("coin");
+    const iChange = colIdx("change");
+    const iRemark = colIdx("remark");
+
+    if (iDate === -1 || iCoin === -1) {
+      errors.push("Binance CSV missing required columns.");
+      return { rows: [], errors, format };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCsvLine(lines[i]);
+      const get = (idx: number) => (idx >= 0 ? (c[idx] ?? "") : "");
+      const asset = get(iCoin).toUpperCase();
+      rows.push({
+        date: get(iDate).slice(0, 10),
+        txType: mapBinanceTxType(get(iOp)),
+        asset,
+        assetName: asset,
+        exchange: "Binance",
+        amount: Math.abs(Number.parseFloat(get(iChange)) || 0),
+        priceUSD: 0,
+        costBasisUSD: 0,
+        gainLossUSD: 0,
+        notes: get(iRemark),
+        tags: [],
+      });
+    }
+    return { rows, errors, format };
+  }
+
+  if (format === "kraken") {
+    const iTime = colIdx("time");
+    const iType = colIdx("type");
+    const iAsset = colIdx("asset");
+    const iAmount = colIdx("amount");
+
+    if (iTime === -1 || iAsset === -1 || iAmount === -1) {
+      errors.push("Kraken CSV missing required columns.");
+      return { rows: [], errors, format };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCsvLine(lines[i]);
+      const get = (idx: number) => (idx >= 0 ? (c[idx] ?? "") : "");
+      const asset = normalizeKrakenAsset(get(iAsset));
+      rows.push({
+        date: get(iTime).slice(0, 10),
+        txType: mapKrakenTxType(get(iType)),
+        asset,
+        assetName: asset,
+        exchange: "Kraken",
+        amount: Math.abs(Number.parseFloat(get(iAmount)) || 0),
+        priceUSD: 0,
+        costBasisUSD: 0,
+        gainLossUSD: 0,
+        notes: "",
+        tags: [],
+      });
+    }
+    return { rows, errors, format };
+  }
+
+  if (format === "gemini") {
+    const iDate = colIdx("date");
+    const iType = colIdx("type");
+    const iSymbol = colIdx("symbol");
+    const iUsdAmt = colIdx("usd amount");
+    const iSpec = colIdx("specification");
+
+    if (iDate === -1 || iType === -1) {
+      errors.push("Gemini CSV missing required columns.");
+      return { rows: [], errors, format };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCsvLine(lines[i]);
+      const get = (idx: number) => (idx >= 0 ? (c[idx] ?? "") : "");
+      const { txType, tags } = mapGeminiTxType(get(iType));
+      const asset = iSymbol >= 0 ? extractGeminiAsset(get(iSymbol)) : "UNKNOWN";
+      const usdAmt = Math.abs(
+        Number.parseFloat(get(iUsdAmt).replace(/[,$]/g, "")) || 0,
+      );
+      rows.push({
+        date: get(iDate).slice(0, 10),
+        txType,
+        asset,
+        assetName: asset,
+        exchange: "Gemini",
+        amount: 0,
+        priceUSD: 0,
+        costBasisUSD: usdAmt,
+        gainLossUSD: 0,
+        notes: get(iSpec),
+        tags,
+      });
+    }
+    return { rows, errors, format };
+  }
+
+  // Generic fallback
   const colMap: Record<string, number> = {};
   const fieldMappings: Record<string, string[]> = {
     date: ["date"],
@@ -113,14 +382,12 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: string[] } {
     if (idx !== -1) colMap[field] = idx;
   }
 
-  const errors: string[] = [];
   if (colMap.date === undefined) errors.push("Missing required column: date");
   if (colMap.asset === undefined) errors.push("Missing required column: asset");
-  if (errors.length > 0) return { rows: [], errors };
+  if (errors.length > 0) return { rows: [], errors, format };
 
-  const rows: ParsedRow[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(",").map((c) => c.trim());
+    const cells = parseCsvLine(lines[i]);
     const get = (field: string, fallback = "") =>
       colMap[field] !== undefined
         ? (cells[colMap[field]] ?? fallback)
@@ -137,10 +404,21 @@ function parseCSV(text: string): { rows: ParsedRow[]; errors: string[] } {
       costBasisUSD: Number.parseFloat(get("costBasisUSD", "0")) || 0,
       gainLossUSD: Number.parseFloat(get("gainLossUSD", "0")) || 0,
       notes: get("notes", ""),
+      tags: [],
     });
   }
 
-  return { rows, errors };
+  return { rows, errors, format };
+}
+
+function downloadSampleCsv() {
+  const blob = new Blob([SAMPLE_CSV], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "sample-transactions.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 interface CsvImportDialogProps {
@@ -160,6 +438,8 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importTotal, setImportTotal] = useState(0);
+  const [detectedFormat, setDetectedFormat] =
+    useState<DetectedFormat>("generic");
 
   function resetState() {
     setStep("upload");
@@ -169,6 +449,7 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
     setIsDragging(false);
     setImportProgress(0);
     setImportTotal(0);
+    setDetectedFormat("generic");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -187,9 +468,10 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const { rows, errors } = parseCSV(text);
+      const { rows, errors, format } = parseCSV(text);
       setParsedRows(rows);
       setParseErrors(errors);
+      setDetectedFormat(format);
       setStep("preview");
     };
     reader.readAsText(file);
@@ -228,11 +510,20 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
       const row = parsedRows[i];
       try {
         const tx: Transaction = {
-          ...row,
+          date: row.date,
+          txType: row.txType,
+          asset: row.asset,
+          assetName: row.assetName,
+          exchange: row.exchange,
+          amount: row.amount,
+          priceUSD: row.priceUSD,
+          costBasisUSD: row.costBasisUSD,
+          gainLossUSD: row.gainLossUSD,
+          notes: row.notes,
           id: BigInt(Date.now() + i),
           isFlagged: false,
           flagReason: "",
-          tags: [],
+          tags: row.tags ?? [],
           isShortTerm: true,
         };
         await addMutation.mutateAsync(tx);
@@ -298,13 +589,37 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
               />
             </label>
 
-            <div className="rounded-md bg-secondary/50 border border-border px-4 py-3 space-y-1">
+            <div className="rounded-md bg-secondary/50 border border-border px-4 py-3 space-y-2">
               <p className="text-xs font-medium text-muted-foreground">
-                Expected columns:
+                Supported formats:
               </p>
-              <p className="text-xs text-foreground font-mono break-all">
-                {CSV_COLUMNS}
-              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    "Coinbase",
+                    "Binance",
+                    "Kraken",
+                    "Gemini",
+                    "Generic CSV",
+                  ] as const
+                ).map((ex) => (
+                  <span
+                    key={ex}
+                    className="text-xs px-2 py-0.5 rounded-full bg-secondary border border-border text-foreground"
+                  >
+                    {ex}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                data-ocid="transactions.csv_import.upload_button"
+                onClick={downloadSampleCsv}
+                className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
+              >
+                <FileUp className="w-3 h-3" />
+                Download sample CSV
+              </button>
             </div>
           </div>
         )}
@@ -326,13 +641,16 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
               </div>
             ) : (
               <>
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-sm flex-wrap">
                   <CheckCircle2 className="w-4 h-4 text-gain" />
                   <span className="text-foreground font-medium">
                     {parsedRows.length} rows detected
                   </span>
                   <span className="text-muted-foreground text-xs">
                     from {fileName}
+                  </span>
+                  <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    Detected format: {FORMAT_LABEL[detectedFormat]}
                   </span>
                 </div>
 

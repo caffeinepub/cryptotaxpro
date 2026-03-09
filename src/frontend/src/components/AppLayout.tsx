@@ -8,7 +8,6 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
-  Plug,
   Scissors,
   Settings,
   TrendingUp,
@@ -42,12 +41,6 @@ const navItems = [
     label: "Harvesting",
     icon: Scissors,
     ocid: "nav.harvesting.link",
-  },
-  {
-    path: "/integrations",
-    label: "Integrations",
-    icon: Plug,
-    ocid: "nav.integrations.link",
   },
   {
     path: "/pricing",

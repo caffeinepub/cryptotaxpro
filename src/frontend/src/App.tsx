@@ -11,7 +11,6 @@ import { AppLayout } from "./components/AppLayout";
 import { AuthGuard } from "./components/AuthGuard";
 import { Dashboard } from "./pages/Dashboard";
 import { Harvesting } from "./pages/Harvesting";
-import { Integrations } from "./pages/Integrations";
 import { Login } from "./pages/Login";
 import { Pricing } from "./pages/Pricing";
 import { Settings } from "./pages/Settings";
@@ -89,12 +88,6 @@ const harvestingRoute = createRoute({
   component: Harvesting,
 });
 
-const integrationsRoute = createRoute({
-  getParentRoute: () => layoutRoute,
-  path: "/integrations",
-  component: Integrations,
-});
-
 const pricingRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "/pricing",
@@ -116,7 +109,6 @@ const routeTree = rootRoute.addChildren([
       transactionsRoute,
       reportsRoute,
       harvestingRoute,
-      integrationsRoute,
       pricingRoute,
       settingsRoute,
     ]),
