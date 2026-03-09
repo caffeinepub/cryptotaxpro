@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
+import type { backendInterface } from "../backend";
 import type {
   HarvestCandidate,
   Holding,
@@ -10,6 +11,22 @@ import type {
 } from "../backend.d";
 import { mockUserProfile } from "../data/mockData";
 import { useActor } from "./useActor";
+
+// ──────────────────────────────────────────────
+// Helper: get actor from React Query cache (handles race condition
+// where hook closure captures a stale null actor on first render)
+// ──────────────────────────────────────────────
+function getActorFromCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+): backendInterface | null {
+  const queries = queryClient.getQueriesData<backendInterface>({
+    queryKey: ["actor"],
+  });
+  for (const [, data] of queries) {
+    if (data) return data;
+  }
+  return null;
+}
 
 // ──────────────────────────────────────────────
 // Transactions
@@ -31,8 +48,9 @@ export function useAddTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (tx: Transaction) => {
-      if (!actor) throw new Error("No actor");
-      return actor.addTransaction(tx);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.addTransaction(tx);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -45,8 +63,9 @@ export function useUpdateTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (tx: Transaction) => {
-      if (!actor) throw new Error("No actor");
-      return actor.updateTransaction(tx);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.updateTransaction(tx);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -59,8 +78,9 @@ export function useDeleteTransaction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: bigint) => {
-      if (!actor) throw new Error("No actor");
-      return actor.deleteTransaction(id);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.deleteTransaction(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -307,8 +327,9 @@ export function useSaveUserProfile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (profile: UserProfile) => {
-      if (!actor) throw new Error("No actor");
-      return actor.saveCallerUserProfile(profile);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.saveCallerUserProfile(profile);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["userProfile"] });
@@ -321,8 +342,9 @@ export function useUpgradePlan() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (plan: string) => {
-      if (!actor) throw new Error("No actor");
-      return actor.upgradePlan(plan);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.upgradePlan(plan);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["userProfile"] });
@@ -356,8 +378,9 @@ export function useSaveIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (connection: IntegrationConnection) => {
-      if (!actor) throw new Error("No actor");
-      return actor.saveIntegration(connection);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.saveIntegration(connection);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
@@ -370,8 +393,9 @@ export function useDeleteIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      if (!actor) throw new Error("No actor");
-      return actor.deleteIntegration(id);
+      const actorInstance = actor ?? getActorFromCache(queryClient);
+      if (!actorInstance) throw new Error("No actor");
+      return actorInstance.deleteIntegration(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
