@@ -67,10 +67,12 @@ import {
 // CSV Import Dialog
 // ──────────────────────────────────────────────
 
-const SAMPLE_CSV = `date,type,asset,assetName,exchange,amount,priceUSD,costBasisUSD,gainLossUSD,notes
-2025-03-15,Trade,BTC,Bitcoin,Coinbase,0.5,67500,30000,0,Buy BTC
-2025-06-20,Trade,ETH,Ethereum,Kraken,2,3200,5000,1400,Sell ETH
-2025-09-01,Staking,ETH,Ethereum,Lido,0.05,3100,0,155,Staking reward
+const SAMPLE_CSV = `Transaction ID,Transaction Type,Date & Time,Asset Acquired,Quantity Acquired (Bought, Received, etc),Cost Basis (Incl. Fees and/or Spread) (USD),Data Source,Asset Disposed (Sold, Sent, etc),Quantity Disposed,Proceeds (Excl. Fees and/or Spread) (USD)
+abc-001,Buy,2025-01-15T10:30:00Z,BTC,0.5,33750.00,Coinbase,,,
+abc-002,Sell,2025-03-20T14:15:00Z,,,16800.00,Coinbase,ETH,5,17500.00
+abc-003,Rewards Income,2025-04-01T00:00:00Z,ETH,0.05,155.00,Coinbase,,,
+abc-004,Send,2025-05-10T09:00:00Z,,,,Coinbase,BTC,0.1,
+abc-005,Receive,2025-06-15T11:00:00Z,SOL,10,1200.00,Customer provided,,,
 `;
 
 interface ParsedRow {
@@ -85,6 +87,9 @@ interface ParsedRow {
   gainLossUSD: number;
   notes: string;
   tags?: string[];
+  transactionId?: string;
+  isFlagged?: boolean;
+  flagReason?: string;
 }
 
 /** Parse a single CSV line correctly handling quoted fields with commas inside */
@@ -114,12 +119,28 @@ function parseCsvLine(line: string): string[] {
   return cells;
 }
 
-type DetectedFormat = "coinbase" | "binance" | "kraken" | "gemini" | "generic";
+type DetectedFormat =
+  | "coinbase"
+  | "coinbase_legacy"
+  | "binance"
+  | "kraken"
+  | "gemini"
+  | "generic";
 
 function detectFormat(headers: string[]): DetectedFormat {
   const h = new Set(headers);
-  if (h.has("quantity transacted") || h.has("spot price at transaction")) {
+  // New Coinbase Transaction Report format (2025+)
+  if (
+    h.has("transaction id") &&
+    (h.has("asset acquired") ||
+      h.has("quantity acquired (bought, received, etc)") ||
+      h.has("cost basis (incl. fees and/or spread) (usd)"))
+  ) {
     return "coinbase";
+  }
+  // Legacy Coinbase format
+  if (h.has("quantity transacted") || h.has("spot price at transaction")) {
+    return "coinbase_legacy";
   }
   if (h.has("utc_time") && h.has("operation") && h.has("coin")) {
     return "binance";
@@ -135,6 +156,7 @@ function detectFormat(headers: string[]): DetectedFormat {
 
 const FORMAT_LABEL: Record<DetectedFormat, string> = {
   coinbase: "Coinbase",
+  coinbase_legacy: "Coinbase (Legacy)",
   binance: "Binance",
   kraken: "Kraken",
   gemini: "Gemini",
@@ -143,12 +165,18 @@ const FORMAT_LABEL: Record<DetectedFormat, string> = {
 
 function mapCoinbaseTxType(raw: string): { txType: string; tags: string[] } {
   const v = raw.toLowerCase().trim();
-  if (v === "buy") return { txType: "Trade", tags: ["buy"] };
-  if (v === "sell") return { txType: "Trade", tags: ["sell"] };
+  if (v === "buy" || v === "advanced trade buy")
+    return { txType: "Trade", tags: ["buy"] };
+  if (v === "sell" || v === "advanced trade sell")
+    return { txType: "Trade", tags: ["sell"] };
   if (v === "rewards income" || v === "staking income")
     return { txType: "Staking", tags: [] };
-  if (v === "receive" || v === "send") return { txType: "Transfer", tags: [] };
-  if (v === "convert") return { txType: "Trade", tags: [] };
+  if (v === "send") return { txType: "Transfer", tags: ["send"] };
+  if (v === "receive") return { txType: "Transfer", tags: ["receive"] };
+  if (v === "convert" || v === "converted from" || v === "converted to")
+    return { txType: "Trade", tags: ["convert"] };
+  if (v === "stake") return { txType: "Staking", tags: ["stake"] };
+  if (v === "unstake") return { txType: "Transfer", tags: ["unstake"] };
   return { txType: "Trade", tags: [] };
 }
 
@@ -224,7 +252,97 @@ function parseCSV(text: string): {
   const errors: string[] = [];
   const rows: ParsedRow[] = [];
 
+  // New Coinbase Transaction Report format (2025+)
   if (format === "coinbase") {
+    const iTxId = colIdx("transaction id");
+    const iType = colIdx("transaction type");
+    const iDateTime = colIdx("date & time");
+    const iAssetAcq = colIdx("asset acquired");
+    const iQtyAcq = colIdx("quantity acquired (bought, received, etc)");
+    const iCostBasis = colIdx("cost basis (incl. fees and/or spread) (usd)");
+    const iDataSource = colIdx("data source");
+    const iAssetDisp = colIdx("asset disposed (sold, sent, etc)");
+    const iQtyDisp = colIdx("quantity disposed");
+    const iProceeds = colIdx("proceeds (excl. fees and/or spread) (usd)");
+
+    if (iDateTime === -1) {
+      errors.push(
+        "Coinbase Transaction Report CSV missing required 'Date & Time' column.",
+      );
+      return { rows: [], errors, format };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCsvLine(lines[i]);
+      const get = (idx: number) => (idx >= 0 ? (c[idx] ?? "").trim() : "");
+
+      const parseUSD = (val: string) =>
+        Number.parseFloat(val.replace(/[$,]/g, "")) || 0;
+
+      const txId = get(iTxId);
+      const rawType = get(iType);
+      const { txType, tags } = mapCoinbaseTxType(rawType);
+
+      // Date: handle "2025-01-15T10:30:00Z" or "2025-01-15 10:30:00 UTC"
+      const rawDateTime = get(iDateTime);
+      const date = rawDateTime.slice(0, 10).replace(" ", "-");
+
+      const assetAcq = get(iAssetAcq).toUpperCase();
+      const qtyAcq = Number.parseFloat(get(iQtyAcq)) || 0;
+      const costBasis = parseUSD(get(iCostBasis));
+      const dataSource = get(iDataSource) || "Coinbase";
+      const assetDisp = get(iAssetDisp).toUpperCase();
+      const qtyDisp = Number.parseFloat(get(iQtyDisp)) || 0;
+      const proceeds = parseUSD(get(iProceeds));
+
+      // Determine primary asset: prefer acquired, fall back to disposed
+      const asset = assetAcq || assetDisp || "UNKNOWN";
+      // Determine amount: prefer acquired qty, fall back to disposed qty
+      const amount = qtyAcq > 0 ? qtyAcq : qtyDisp;
+
+      // Compute priceUSD from proceeds / qtyDisp for sells
+      const priceUSD = proceeds > 0 && qtyDisp > 0 ? proceeds / qtyDisp : 0;
+
+      // gainLossUSD for sells/disposals: proceeds - costBasis
+      const isSell = [
+        "sell",
+        "advanced trade sell",
+        "send",
+        "converted from",
+      ].includes(rawType.toLowerCase().trim());
+      const gainLossUSD = isSell && proceeds > 0 ? proceeds - costBasis : 0;
+
+      // Build notes
+      const notesParts: string[] = [];
+      if (txId) notesParts.push(`TX: ${txId}`);
+      if (assetAcq && assetDisp) notesParts.push(`Disposed: ${assetDisp}`);
+
+      // Flag if missing cost basis on a trade
+      const isFlagged = costBasis === 0 && txType === "Trade";
+      const flagReason = isFlagged ? "Missing cost basis" : "";
+
+      rows.push({
+        date,
+        txType,
+        asset,
+        assetName: asset,
+        exchange: dataSource,
+        amount,
+        priceUSD,
+        costBasisUSD: costBasis,
+        gainLossUSD,
+        notes: notesParts.join(" | "),
+        tags,
+        transactionId: txId || undefined,
+        isFlagged,
+        flagReason,
+      });
+    }
+    return { rows, errors, format };
+  }
+
+  // Legacy Coinbase format (old CSV export)
+  if (format === "coinbase_legacy") {
     const iDate = colIdx("timestamp");
     const iType = colIdx("transaction type");
     const iAsset = colIdx("asset");
@@ -416,7 +534,7 @@ function downloadSampleCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "sample-transactions.csv";
+  a.download = "coinbase-transaction-report-sample.csv";
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -509,6 +627,11 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
     for (let i = 0; i < parsedRows.length; i++) {
       const row = parsedRows[i];
       try {
+        // Prepend transactionId to notes if present
+        const notes = row.transactionId
+          ? `TX: ${row.transactionId}${row.notes ? ` ${row.notes}` : ""}`.trim()
+          : row.notes;
+
         const tx: Transaction = {
           date: row.date,
           txType: row.txType,
@@ -519,10 +642,10 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
           priceUSD: row.priceUSD,
           costBasisUSD: row.costBasisUSD,
           gainLossUSD: row.gainLossUSD,
-          notes: row.notes,
+          notes,
           id: BigInt(Date.now() + i),
-          isFlagged: false,
-          flagReason: "",
+          isFlagged: row.isFlagged ?? false,
+          flagReason: row.flagReason ?? "",
           tags: row.tags ?? [],
           isShortTerm: true,
         };
