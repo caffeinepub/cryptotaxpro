@@ -270,96 +270,858 @@ export function Integrations() {
     const now = Date.now();
     const day = 86_400_000;
 
-    // Per-exchange asset profiles
-    const profiles: Record<
-      string,
-      {
-        assets: Array<{
-          symbol: string;
-          name: string;
-          price: number;
-          amount: number;
-        }>;
-      }
-    > = {
-      coinbase: {
-        assets: [
-          {
-            symbol: "BTC",
-            name: "Bitcoin",
-            price: 67_500,
-            amount: 0.25,
-          },
-          { symbol: "ETH", name: "Ethereum", price: 3_800, amount: 1.5 },
-          { symbol: "SOL", name: "Solana", price: 185, amount: 12 },
-          { symbol: "USDC", name: "USD Coin", price: 1, amount: 500 },
-        ],
-      },
-      binance: {
-        assets: [
-          { symbol: "BTC", name: "Bitcoin", price: 67_500, amount: 0.15 },
-          { symbol: "BNB", name: "BNB", price: 580, amount: 5 },
-          { symbol: "ETH", name: "Ethereum", price: 3_800, amount: 0.8 },
-          { symbol: "DOGE", name: "Dogecoin", price: 0.18, amount: 2000 },
-        ],
-      },
-      kraken: {
-        assets: [
-          { symbol: "BTC", name: "Bitcoin", price: 67_500, amount: 0.1 },
-          { symbol: "ETH", name: "Ethereum", price: 3_800, amount: 2.0 },
-          { symbol: "DOT", name: "Polkadot", price: 9.5, amount: 50 },
-        ],
-      },
-      gemini: {
-        assets: [
-          { symbol: "BTC", name: "Bitcoin", price: 67_500, amount: 0.05 },
-          { symbol: "ETH", name: "Ethereum", price: 3_800, amount: 1.2 },
-          {
-            symbol: "GUSD",
-            name: "Gemini Dollar",
-            price: 1,
-            amount: 250,
-          },
-        ],
-      },
-    };
-
-    // Fallback profile for exchanges without a dedicated profile
-    const defaultProfile = {
-      assets: [
-        { symbol: "BTC", name: "Bitcoin", price: 67_500, amount: 0.1 },
-        { symbol: "ETH", name: "Ethereum", price: 3_800, amount: 1.0 },
+    // Historical price snapshots: [daysAgo, price]
+    const historicalPrices: Record<string, Array<[number, number]>> = {
+      BTC: [
+        [730, 28000],
+        [540, 35000],
+        [365, 42000],
+        [270, 52000],
+        [180, 58000],
+        [90, 61000],
+        [30, 67500],
+        [0, 67500],
+      ],
+      ETH: [
+        [730, 1600],
+        [540, 1900],
+        [365, 2400],
+        [270, 2900],
+        [180, 3100],
+        [90, 3500],
+        [30, 3800],
+        [0, 3800],
+      ],
+      SOL: [
+        [730, 20],
+        [540, 40],
+        [365, 80],
+        [270, 120],
+        [180, 150],
+        [90, 170],
+        [30, 185],
+        [0, 185],
+      ],
+      BNB: [
+        [730, 280],
+        [540, 320],
+        [365, 380],
+        [270, 430],
+        [180, 500],
+        [90, 550],
+        [30, 580],
+        [0, 580],
+      ],
+      DOGE: [
+        [730, 0.07],
+        [540, 0.09],
+        [365, 0.12],
+        [270, 0.14],
+        [180, 0.16],
+        [90, 0.17],
+        [30, 0.18],
+        [0, 0.18],
+      ],
+      DOT: [
+        [730, 5],
+        [540, 6],
+        [365, 7],
+        [270, 8],
+        [180, 8.5],
+        [90, 9],
+        [30, 9.5],
+        [0, 9.5],
+      ],
+      MATIC: [
+        [730, 0.6],
+        [540, 0.8],
+        [365, 1.0],
+        [270, 1.1],
+        [180, 1.2],
+        [90, 1.3],
+        [30, 0.95],
+        [0, 0.95],
+      ],
+      LINK: [
+        [730, 6],
+        [540, 8],
+        [365, 12],
+        [270, 14],
+        [180, 16],
+        [90, 17],
+        [30, 18],
+        [0, 18],
+      ],
+      GUSD: [
+        [730, 1],
+        [540, 1],
+        [365, 1],
+        [270, 1],
+        [180, 1],
+        [90, 1],
+        [30, 1],
+        [0, 1],
+      ],
+      USDC: [
+        [730, 1],
+        [540, 1],
+        [365, 1],
+        [270, 1],
+        [180, 1],
+        [90, 1],
+        [30, 1],
+        [0, 1],
       ],
     };
 
-    const profile = profiles[integrationId] ?? defaultProfile;
+    function priceAt(symbol: string, daysAgo: number): number {
+      const pts = historicalPrices[symbol];
+      if (!pts) return 1;
+      for (let i = pts.length - 1; i >= 0; i--) {
+        if (daysAgo >= pts[i][0]) {
+          if (i === pts.length - 1) return pts[i][1];
+          const [d0, p0] = pts[i];
+          const [d1, p1] = pts[i + 1];
+          const t = (daysAgo - d0) / (d1 - d0);
+          return p0 + (p1 - p0) * t;
+        }
+      }
+      return pts[0][1];
+    }
+
+    function dateStr(daysAgo: number): string {
+      return new Date(now - daysAgo * day).toISOString().slice(0, 10);
+    }
+
+    type TxDef = {
+      daysAgo: number;
+      txType: string;
+      asset: string;
+      assetName: string;
+      amount: number;
+      tags?: string[];
+      notes?: string;
+      isFlagged?: boolean;
+      flagReason?: string;
+    };
+
+    // Per-exchange realistic transaction histories
+    const txDefs: Record<string, TxDef[]> = {
+      coinbase: [
+        {
+          daysAgo: 720,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.1,
+          tags: ["buy"],
+          notes: "Initial BTC purchase",
+        },
+        {
+          daysAgo: 680,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 1.0,
+          tags: ["buy"],
+          notes: "Initial ETH purchase",
+        },
+        {
+          daysAgo: 600,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.05,
+          tags: ["buy"],
+          notes: "DCA buy",
+        },
+        {
+          daysAgo: 540,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.012,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+        {
+          daysAgo: 500,
+          txType: "Trade",
+          asset: "SOL",
+          assetName: "Solana",
+          amount: 20,
+          tags: ["buy"],
+          notes: "SOL purchase",
+        },
+        {
+          daysAgo: 460,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.5,
+          tags: ["buy"],
+          notes: "ETH top-up",
+        },
+        {
+          daysAgo: 420,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.02,
+          tags: ["sell"],
+          notes: "Partial BTC sell",
+          isFlagged: false,
+        },
+        {
+          daysAgo: 380,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.015,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+        {
+          daysAgo: 360,
+          txType: "Transfer",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.03,
+          tags: ["transfer"],
+          notes: "Transfer to hardware wallet",
+        },
+        {
+          daysAgo: 300,
+          txType: "Trade",
+          asset: "SOL",
+          assetName: "Solana",
+          amount: 5,
+          tags: ["sell"],
+          notes: "SOL partial sell",
+        },
+        {
+          daysAgo: 270,
+          txType: "Airdrop",
+          asset: "USDC",
+          assetName: "USD Coin",
+          amount: 25,
+          tags: ["airdrop"],
+          notes: "Coinbase promotion reward",
+        },
+        {
+          daysAgo: 240,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.018,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+        {
+          daysAgo: 200,
+          txType: "Trade",
+          asset: "SOL",
+          assetName: "Solana",
+          amount: 15,
+          tags: ["buy"],
+          notes: "SOL DCA buy",
+        },
+        {
+          daysAgo: 160,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.3,
+          tags: ["sell"],
+          notes: "ETH partial sell",
+        },
+        {
+          daysAgo: 120,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.02,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+        {
+          daysAgo: 90,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.08,
+          tags: ["buy"],
+          notes: "BTC accumulation",
+        },
+        {
+          daysAgo: 60,
+          txType: "Transfer",
+          asset: "USDC",
+          assetName: "USD Coin",
+          amount: 500,
+          tags: ["transfer"],
+          notes: "USDC deposit from bank",
+        },
+        {
+          daysAgo: 45,
+          txType: "Trade",
+          asset: "SOL",
+          assetName: "Solana",
+          amount: 8,
+          tags: ["buy"],
+          notes: "SOL purchase",
+        },
+        {
+          daysAgo: 30,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.022,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+        {
+          daysAgo: 14,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.01,
+          tags: ["sell"],
+          notes: "BTC sell to cover tax",
+          isFlagged: true,
+          flagReason: "Review cost basis",
+        },
+        {
+          daysAgo: 7,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.25,
+          tags: ["buy"],
+          notes: "ETH purchase",
+        },
+        {
+          daysAgo: 2,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.019,
+          tags: ["staking"],
+          notes: "ETH2 staking reward",
+        },
+      ],
+      binance: [
+        {
+          daysAgo: 700,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.08,
+          tags: ["buy"],
+          notes: "Initial BTC buy",
+        },
+        {
+          daysAgo: 650,
+          txType: "Trade",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 10,
+          tags: ["buy"],
+          notes: "BNB for trading fees",
+        },
+        {
+          daysAgo: 600,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.5,
+          tags: ["buy"],
+          notes: "ETH purchase",
+        },
+        {
+          daysAgo: 550,
+          txType: "Trade",
+          asset: "DOGE",
+          assetName: "Dogecoin",
+          amount: 5000,
+          tags: ["buy"],
+          notes: "DOGE speculation",
+        },
+        {
+          daysAgo: 500,
+          txType: "Staking",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 0.5,
+          tags: ["staking"],
+          notes: "BNB flexible savings",
+        },
+        {
+          daysAgo: 460,
+          txType: "Trade",
+          asset: "DOGE",
+          assetName: "Dogecoin",
+          amount: 2000,
+          tags: ["sell"],
+          notes: "DOGE partial sell",
+        },
+        {
+          daysAgo: 420,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.03,
+          tags: ["buy"],
+          notes: "BTC DCA",
+        },
+        {
+          daysAgo: 380,
+          txType: "Staking",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 0.6,
+          tags: ["staking"],
+          notes: "BNB flexible savings",
+        },
+        {
+          daysAgo: 340,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.3,
+          tags: ["buy"],
+          notes: "ETH accumulation",
+        },
+        {
+          daysAgo: 300,
+          txType: "Trade",
+          asset: "MATIC",
+          assetName: "Polygon",
+          amount: 500,
+          tags: ["buy"],
+          notes: "MATIC purchase",
+        },
+        {
+          daysAgo: 260,
+          txType: "Trade",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 5,
+          tags: ["buy"],
+          notes: "BNB top-up",
+        },
+        {
+          daysAgo: 220,
+          txType: "Staking",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 0.7,
+          tags: ["staking"],
+          notes: "BNB flexible savings",
+        },
+        {
+          daysAgo: 180,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.04,
+          tags: ["buy"],
+          notes: "BTC DCA",
+        },
+        {
+          daysAgo: 140,
+          txType: "Trade",
+          asset: "DOGE",
+          assetName: "Dogecoin",
+          amount: 3000,
+          tags: ["buy"],
+          notes: "DOGE re-entry",
+        },
+        {
+          daysAgo: 100,
+          txType: "Transfer",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.05,
+          tags: ["transfer"],
+          notes: "Withdrawal to cold wallet",
+        },
+        {
+          daysAgo: 60,
+          txType: "Staking",
+          asset: "BNB",
+          assetName: "BNB",
+          amount: 0.8,
+          tags: ["staking"],
+          notes: "BNB flexible savings",
+        },
+        {
+          daysAgo: 30,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.2,
+          tags: ["sell"],
+          notes: "ETH partial exit",
+        },
+        {
+          daysAgo: 10,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.02,
+          tags: ["buy"],
+          notes: "BTC purchase",
+        },
+      ],
+      kraken: [
+        {
+          daysAgo: 680,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.06,
+          tags: ["buy"],
+          notes: "BTC purchase",
+        },
+        {
+          daysAgo: 620,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 1.5,
+          tags: ["buy"],
+          notes: "ETH purchase",
+        },
+        {
+          daysAgo: 560,
+          txType: "Trade",
+          asset: "DOT",
+          assetName: "Polkadot",
+          amount: 80,
+          tags: ["buy"],
+          notes: "DOT purchase",
+        },
+        {
+          daysAgo: 500,
+          txType: "Staking",
+          asset: "DOT",
+          assetName: "Polkadot",
+          amount: 2.5,
+          tags: ["staking"],
+          notes: "DOT staking reward",
+        },
+        {
+          daysAgo: 440,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.4,
+          tags: ["sell"],
+          notes: "ETH partial sell",
+        },
+        {
+          daysAgo: 380,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.04,
+          tags: ["buy"],
+          notes: "BTC DCA",
+        },
+        {
+          daysAgo: 320,
+          txType: "Staking",
+          asset: "DOT",
+          assetName: "Polkadot",
+          amount: 3.0,
+          tags: ["staking"],
+          notes: "DOT staking reward",
+        },
+        {
+          daysAgo: 260,
+          txType: "Trade",
+          asset: "DOT",
+          assetName: "Polkadot",
+          amount: 30,
+          tags: ["sell"],
+          notes: "DOT partial sell",
+        },
+        {
+          daysAgo: 200,
+          txType: "Trade",
+          asset: "LINK",
+          assetName: "Chainlink",
+          amount: 50,
+          tags: ["buy"],
+          notes: "LINK purchase",
+        },
+        {
+          daysAgo: 140,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.01,
+          tags: ["staking"],
+          notes: "ETH staking reward",
+        },
+        {
+          daysAgo: 80,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.03,
+          tags: ["buy"],
+          notes: "BTC accumulation",
+        },
+        {
+          daysAgo: 40,
+          txType: "Transfer",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.5,
+          tags: ["transfer"],
+          notes: "ETH to MetaMask",
+        },
+        {
+          daysAgo: 15,
+          txType: "Trade",
+          asset: "LINK",
+          assetName: "Chainlink",
+          amount: 20,
+          tags: ["sell"],
+          notes: "LINK partial exit",
+        },
+      ],
+      gemini: [
+        {
+          daysAgo: 660,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.04,
+          tags: ["buy"],
+          notes: "BTC purchase",
+        },
+        {
+          daysAgo: 600,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.8,
+          tags: ["buy"],
+          notes: "ETH purchase",
+        },
+        {
+          daysAgo: 540,
+          txType: "Airdrop",
+          asset: "GUSD",
+          assetName: "Gemini Dollar",
+          amount: 50,
+          tags: ["airdrop"],
+          notes: "Gemini Earn interest",
+        },
+        {
+          daysAgo: 480,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.008,
+          tags: ["staking"],
+          notes: "Gemini staking reward",
+        },
+        {
+          daysAgo: 420,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.02,
+          tags: ["sell"],
+          notes: "BTC sell",
+        },
+        {
+          daysAgo: 360,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.4,
+          tags: ["buy"],
+          notes: "ETH top-up",
+        },
+        {
+          daysAgo: 300,
+          txType: "Airdrop",
+          asset: "GUSD",
+          assetName: "Gemini Dollar",
+          amount: 35,
+          tags: ["airdrop"],
+          notes: "Gemini Earn interest",
+        },
+        {
+          daysAgo: 240,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.01,
+          tags: ["staking"],
+          notes: "Gemini staking reward",
+        },
+        {
+          daysAgo: 180,
+          txType: "Trade",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.2,
+          tags: ["sell"],
+          notes: "ETH sell",
+        },
+        {
+          daysAgo: 120,
+          txType: "Trade",
+          asset: "BTC",
+          assetName: "Bitcoin",
+          amount: 0.01,
+          tags: ["buy"],
+          notes: "BTC DCA",
+        },
+        {
+          daysAgo: 60,
+          txType: "Airdrop",
+          asset: "GUSD",
+          assetName: "Gemini Dollar",
+          amount: 28,
+          tags: ["airdrop"],
+          notes: "Gemini Earn interest",
+        },
+        {
+          daysAgo: 20,
+          txType: "Staking",
+          asset: "ETH",
+          assetName: "Ethereum",
+          amount: 0.012,
+          tags: ["staking"],
+          notes: "Gemini staking reward",
+        },
+      ],
+    };
+
+    const defaultDefs: TxDef[] = [
+      {
+        daysAgo: 500,
+        txType: "Trade",
+        asset: "BTC",
+        assetName: "Bitcoin",
+        amount: 0.05,
+        tags: ["buy"],
+        notes: "BTC purchase",
+      },
+      {
+        daysAgo: 420,
+        txType: "Trade",
+        asset: "ETH",
+        assetName: "Ethereum",
+        amount: 0.8,
+        tags: ["buy"],
+        notes: "ETH purchase",
+      },
+      {
+        daysAgo: 340,
+        txType: "Trade",
+        asset: "BTC",
+        assetName: "Bitcoin",
+        amount: 0.02,
+        tags: ["sell"],
+        notes: "BTC partial sell",
+      },
+      {
+        daysAgo: 260,
+        txType: "Staking",
+        asset: "ETH",
+        assetName: "Ethereum",
+        amount: 0.01,
+        tags: ["staking"],
+        notes: "Staking reward",
+      },
+      {
+        daysAgo: 180,
+        txType: "Trade",
+        asset: "ETH",
+        assetName: "Ethereum",
+        amount: 0.3,
+        tags: ["buy"],
+        notes: "ETH purchase",
+      },
+      {
+        daysAgo: 100,
+        txType: "Transfer",
+        asset: "BTC",
+        assetName: "Bitcoin",
+        amount: 0.01,
+        tags: ["transfer"],
+        notes: "Withdrawal",
+      },
+      {
+        daysAgo: 30,
+        txType: "Trade",
+        asset: "BTC",
+        assetName: "Bitcoin",
+        amount: 0.03,
+        tags: ["buy"],
+        notes: "BTC DCA",
+      },
+    ];
+
+    const defs = txDefs[integrationId] ?? defaultDefs;
     const transactions: import("../backend.d").Transaction[] = [];
 
-    for (let i = 0; i < profile.assets.length; i++) {
-      const asset = profile.assets[i];
-      const buyDate = new Date(now - (180 - i * 30) * day)
-        .toISOString()
-        .slice(0, 10);
-      const buyPrice = asset.price * 0.85;
-      const costBasis = buyPrice;
-      const gainLoss = (asset.price - buyPrice) * asset.amount;
+    for (let i = 0; i < defs.length; i++) {
+      const def = defs[i];
+      const price = priceAt(def.asset, def.daysAgo);
+      const isBuy = def.txType === "Trade" && (def.tags ?? []).includes("buy");
+      const isSell =
+        def.txType === "Trade" && (def.tags ?? []).includes("sell");
+      const isIncome = def.txType === "Staking" || def.txType === "Airdrop";
+
+      // Cost basis: what was paid (buy price at time of acquisition)
+      // For sells, cost basis is estimated as the price ~90 days before the sale
+      const costBasisPrice = isSell
+        ? priceAt(def.asset, def.daysAgo + 90)
+        : price;
+      const totalProceeds = price * def.amount;
+      const totalCostBasis = costBasisPrice * def.amount;
+      const gainLoss = isSell
+        ? totalProceeds - totalCostBasis
+        : isIncome
+          ? totalProceeds
+          : 0;
+
+      // Short-term = held < 365 days (for sells, assume 90-day hold)
+      const isShortTerm = isSell
+        ? def.daysAgo + 90 > def.daysAgo && 90 < 365
+        : false;
 
       transactions.push({
-        id: BigInt(now - i * 1000),
-        date: buyDate,
-        txType: "Trade",
-        asset: asset.symbol,
-        assetName: asset.name,
+        id: BigInt(now - i * 1000 - def.daysAgo),
+        date: dateStr(def.daysAgo),
+        txType: def.txType,
+        asset: def.asset,
+        assetName: def.assetName,
         exchange: exchangeName,
-        amount: asset.amount,
-        priceUSD: asset.price,
-        costBasisUSD: costBasis,
+        amount: def.amount,
+        priceUSD: isBuy ? price : isSell ? price : price,
+        costBasisUSD: isBuy
+          ? totalCostBasis
+          : isSell
+            ? totalCostBasis
+            : isIncome
+              ? 0
+              : 0,
         gainLossUSD: gainLoss,
-        isShortTerm: true,
-        isFlagged: false,
-        flagReason: "",
-        tags: ["imported", integrationId],
-        notes: `Imported from ${exchangeName}`,
+        isShortTerm,
+        isFlagged: def.isFlagged ?? false,
+        flagReason: def.flagReason ?? "",
+        tags: [...(def.tags ?? []), "imported", integrationId],
+        notes: def.notes ?? `Imported from ${exchangeName}`,
       });
     }
 
