@@ -658,8 +658,52 @@ function CsvImportDialog({ open, onOpenChange }: CsvImportDialogProps) {
       isShortTerm: true,
     }));
 
+    // FIFO lot matching to compute isShortTerm
+    const sortedForFifo = [...txs].sort((a, b) => a.date.localeCompare(b.date));
+    const lotQueues = new Map<
+      string,
+      Array<{ date: string; remaining: number }>
+    >();
+
+    for (const tx of sortedForFifo) {
+      const isBuy =
+        (tx.tags ?? []).includes("buy") && !(tx.tags ?? []).includes("sell");
+      if (isBuy && tx.amount > 0) {
+        const asset = tx.asset.toUpperCase();
+        if (!lotQueues.has(asset)) lotQueues.set(asset, []);
+        lotQueues.get(asset)!.push({ date: tx.date, remaining: tx.amount });
+      }
+    }
+
+    const txsWithHolding = txs.map((tx) => {
+      const isSell = (tx.tags ?? []).includes("sell");
+      if (!isSell) return tx;
+
+      const asset = tx.asset.toUpperCase();
+      const lots = lotQueues.get(asset) ?? [];
+      let remaining = tx.amount;
+      let acquisitionDate: string | null = null;
+
+      for (const lot of lots) {
+        if (remaining <= 0) break;
+        if (lot.remaining <= 0) continue;
+        const consumed = Math.min(lot.remaining, remaining);
+        lot.remaining -= consumed;
+        remaining -= consumed;
+        if (!acquisitionDate) acquisitionDate = lot.date;
+      }
+
+      if (!acquisitionDate) return tx;
+
+      const acqDate = new Date(acquisitionDate);
+      const dispDate = new Date(tx.date);
+      const holdingDays =
+        (dispDate.getTime() - acqDate.getTime()) / (1000 * 60 * 60 * 24);
+      return { ...tx, isShortTerm: holdingDays <= 365 };
+    });
+
     try {
-      await addBulkMutation.mutateAsync(txs);
+      await addBulkMutation.mutateAsync(txsWithHolding);
       setImportProgress(parsedRows.length);
       setStep("done");
       toast.success(`Imported ${parsedRows.length} transactions`);

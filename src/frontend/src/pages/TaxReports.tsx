@@ -68,7 +68,7 @@ function getProceeds(tx: Transaction): number {
 }
 
 function getBasis(tx: Transaction): number {
-  return Math.round(tx.costBasisUSD * tx.amount);
+  return Math.round(tx.costBasisUSD);
 }
 
 function getGainLoss(tx: Transaction): number {
@@ -110,8 +110,12 @@ function Form8949Preview({
   transactions,
   isLoading,
 }: Form8949PreviewProps) {
-  const shortTermTxs = transactions.filter((tx) => tx.isShortTerm);
-  const longTermTxs = transactions.filter((tx) => !tx.isShortTerm);
+  const shortTermTxs = transactions.filter(
+    (tx) => tx.isShortTerm && !(tx.tags ?? []).includes("buy"),
+  );
+  const longTermTxs = transactions.filter(
+    (tx) => !tx.isShortTerm && !(tx.tags ?? []).includes("buy"),
+  );
 
   function sumColumn(txs: Transaction[], col: "d" | "e" | "g" | "h"): number {
     return txs.reduce((sum, tx) => {
@@ -422,7 +426,8 @@ function ScheduleDPreview({
   const yearTxs = transactions.filter((tx) => tx.date.startsWith(taxYear));
   const disposals = yearTxs.filter(
     (tx) =>
-      tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+      (tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi") &&
+      !(tx.tags ?? []).includes("buy"),
   );
 
   const shortTermDisposals = disposals.filter((tx) => tx.isShortTerm);
@@ -798,7 +803,8 @@ export function TaxReports() {
   // Filter to disposal transactions (Trade, NFT, DeFi)
   const allDisposals = (transactions ?? []).filter(
     (tx) =>
-      tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+      (tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi") &&
+      !(tx.tags ?? []).includes("buy"),
   );
   const yearDisposals = allDisposals.filter((tx) =>
     tx.date.startsWith(taxYear),
@@ -814,7 +820,10 @@ export function TaxReports() {
       // IRS-accurate Form 8949 CSV
       const disposalTxs = yearTxs.filter(
         (tx) =>
-          tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+          (tx.txType === "Trade" ||
+            tx.txType === "NFT" ||
+            tx.txType === "DeFi") &&
+          !(tx.tags ?? []).includes("buy"),
       );
       const rows = [
         [
@@ -851,7 +860,10 @@ export function TaxReports() {
       // IRS-accurate Schedule D CSV
       const disposalTxs = yearTxs.filter(
         (tx) =>
-          tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+          (tx.txType === "Trade" ||
+            tx.txType === "NFT" ||
+            tx.txType === "DeFi") &&
+          !(tx.tags ?? []).includes("buy"),
       );
       const stGainLoss = disposalTxs
         .filter((tx) => tx.isShortTerm)
@@ -938,7 +950,10 @@ export function TaxReports() {
     } else if (reportName === "TurboTax Export") {
       const disposalTxs = yearTxs.filter(
         (tx) =>
-          tx.txType === "Trade" || tx.txType === "NFT" || tx.txType === "DeFi",
+          (tx.txType === "Trade" ||
+            tx.txType === "NFT" ||
+            tx.txType === "DeFi") &&
+          !(tx.tags ?? []).includes("buy"),
       );
       const rows = [
         [

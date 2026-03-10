@@ -12,28 +12,14 @@ export function useActor() {
   const actorQuery = useQuery<backendInterface>({
     queryKey: [ACTOR_QUERY_KEY, identity?.getPrincipal().toString()],
     queryFn: async () => {
-      const isAuthenticated = !!identity;
-
-      if (!isAuthenticated) {
-        // Return anonymous actor if not authenticated
-        return await createActorWithConfig();
-      }
-
-      const actorOptions = {
-        agentOptions: {
-          identity,
-        },
-      };
-
-      const actor = await createActorWithConfig(actorOptions);
+      if (!identity) throw new Error("No identity");
+      const actor = await createActorWithConfig({ agentOptions: { identity } });
       const adminToken = getSecretParameter("caffeineAdminToken") || "";
       await actor._initializeAccessControlWithSecret(adminToken);
       return actor;
     },
-    // Only refetch when identity changes
     staleTime: Number.POSITIVE_INFINITY,
-    // This will cause the actor to be recreated when the identity changes
-    enabled: true,
+    enabled: !!identity,
   });
 
   // When the actor changes, invalidate dependent queries

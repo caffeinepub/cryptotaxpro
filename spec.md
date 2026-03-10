@@ -1,39 +1,29 @@
 # CryptoTaxPro
 
 ## Current State
-The app has 7 pages: Dashboard, Transactions, Tax Reports, Harvesting, Integrations, Pricing, Settings. The Integrations page lets users connect exchanges via fake API key flows that generate hardcoded mock transactions -- there is no real API connectivity possible on ICP. The CSV import dialog exists in Transactions.tsx but only parses a custom internal column format (date, type, asset, assetName, exchange, amount, priceUSD, costBasisUSD, gainLossUSD, notes) and doesn't handle real exchange CSV exports.
+App has a Motoko backend and React frontend. Tax calculations, CSV import, Form 8949/Schedule D previews, dashboard portfolio, and metrics are all implemented. Multiple bugs exist in tax calculation logic.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Robust CSV parsing that handles real-world exchange export formats:
-  - **Coinbase**: columns like `Timestamp`, `Transaction Type`, `Asset`, `Quantity Transacted`, `Spot Price at Transaction`, `Subtotal`, `Total (inclusive of fees and/or spread)`, `Notes`
-  - **Binance**: columns like `UTC_Time`, `Account`, `Operation`, `Coin`, `Change`, `Remark`
-  - **Kraken**: columns like `txid`, `refid`, `time`, `type`, `subtype`, `aclass`, `asset`, `amount`, `fee`, `balance`
-  - **Gemini**: columns like `Date`, `Time (UTC)`, `Type`, `Symbol`, `Specification`, `Liquidity Indicator`, `Trading Fee Rate (bps)`, `USD Amount`, `Fee (USD)`, `USD Balance`, `Trade ID`
-  - **Generic fallback**: any CSV with recognizable date + asset + amount columns
-- Auto-detect which exchange format the CSV is from based on column headers
-- Download sample CSV template button in the import dialog so users know what format to use
-- Clear label in preview showing which exchange format was detected
+- FIFO lot matching during CSV import: compute `isShortTerm` by comparing disposal date vs acquisition date of the matched buy lot (holding period > 365 days = long-term)
 
 ### Modify
-- `CsvImportDialog` in Transactions.tsx: upgrade parser to handle all formats above, show detected exchange name, add sample download
-- `AppLayout.tsx`: remove Integrations nav item
-- `App.tsx`: remove integrations route and import
-- `useQueries.ts`: remove `useIntegrations`, `useSaveIntegration`, `useDeleteIntegration` hooks and the `IntegrationConnection` import
+- `getBasis(tx)` in TaxReports.tsx: fix double-multiplication bug — `costBasisUSD` is already the total cost, not per-unit. Change `Math.round(tx.costBasisUSD * tx.amount)` → `Math.round(tx.costBasisUSD)`
+- Form 8949 / Schedule D disposals filter: exclude buy-side trades (`tags.includes('buy')`) — currently buys leak into Form 8949 as taxable events
+- `useActor.ts`: only create an actor when identity exists (remove anonymous actor creation). Change `enabled: true` → `enabled: !!identity` and remove the `if (!isAuthenticated)` branch
+- `waitForActor` in useQueries.ts: after removing anonymous actor, this should work correctly as it waits for a success state actor
+- `useUserProfile` in useQueries.ts: remove all mock fallbacks (`mockUserProfile`) and `placeholderData: mockUserProfile`. Return null/default profile object when actor is absent or backend returns nothing
+- `isShortTerm: true` hardcode in Transactions.tsx `handleImport`: replace with computed value from FIFO lot matching
 
 ### Remove
-- `src/frontend/src/pages/Integrations.tsx` -- entire file deleted
-- Integrations nav entry from sidebar
-- Integrations route from router
-- Integration-related hooks from useQueries.ts
+- Anonymous actor creation in `useActor.ts`
+- `placeholderData: mockUserProfile` and catch/null fallbacks to `mockUserProfile` in `useUserProfile`
 
 ## Implementation Plan
-1. Delete `Integrations.tsx`
-2. Remove integrations route + import from `App.tsx`
-3. Remove Integrations nav item from `AppLayout.tsx`
-4. Remove integration hooks from `useQueries.ts`
-5. Rewrite `parseCSV` in `Transactions.tsx` to auto-detect and parse Coinbase, Binance, Kraken, Gemini, and generic CSV formats
-6. Add sample CSV download button to the import dialog upload step
-7. Show detected exchange name in the preview step
-8. Validate and build
+1. Fix `getBasis()` in TaxReports.tsx (line 71): remove `* tx.amount`
+2. Fix all disposals filters in TaxReports.tsx to add `&& !(tx.tags ?? []).includes('buy')` exclusion
+3. Fix `useActor.ts`: add `enabled: !!identity`, remove anonymous actor branch
+4. Fix `useUserProfile` in useQueries.ts: return default profile values (not mockUserProfile) when backend returns null
+5. Add FIFO lot matching in Transactions.tsx `handleImport`: sort rows by date, build per-asset lot queues from buys, for each sell determine acquisition date via FIFO and compute `isShortTerm = holdingDays <= 365`
+6. Validate and build

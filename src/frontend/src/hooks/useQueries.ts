@@ -9,7 +9,7 @@ import type {
   Transaction,
   UserProfile,
 } from "../backend.d";
-import { mockUserProfile } from "../data/mockData";
+
 import { useActor } from "./useActor";
 
 // ──────────────────────────────────────────────
@@ -374,20 +374,27 @@ export function useHarvestCandidates(livePrices: Record<string, number> = {}): {
 // ──────────────────────────────────────────────
 // User Profile
 // ──────────────────────────────────────────────
+const DEFAULT_PROFILE: UserProfile = {
+  country: "US",
+  plan: "free",
+  costBasisMethod: "FIFO",
+  currency: "USD",
+  taxYear: 2025n,
+};
+
 export function useUserProfile() {
   const { actor } = useActor();
   return useQuery({
     queryKey: ["userProfile"],
     queryFn: async () => {
-      if (!actor) return mockUserProfile;
+      if (!actor) return DEFAULT_PROFILE;
       try {
         const profile = await actor.getCallerUserProfile();
-        return profile ?? mockUserProfile;
+        return profile ?? DEFAULT_PROFILE;
       } catch {
-        return mockUserProfile;
+        return DEFAULT_PROFILE;
       }
     },
-    placeholderData: mockUserProfile,
     enabled: !!actor,
   });
 }
