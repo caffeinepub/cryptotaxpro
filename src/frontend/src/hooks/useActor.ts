@@ -9,14 +9,13 @@ const ACTOR_QUERY_KEY = "actor";
 export function useActor() {
   const { identity } = useInternetIdentity();
   const queryClient = useQueryClient();
-  const actorQuery = useQuery<backendInterface>({
-    queryKey: [ACTOR_QUERY_KEY, identity?.getPrincipal().toString()],
-    queryFn: async () => {
-      const isAuthenticated = !!identity;
+  const principalStr = identity?.getPrincipal().toString();
 
-      if (!isAuthenticated) {
-        // Return anonymous actor if not authenticated
-        return await createActorWithConfig();
+  const actorQuery = useQuery<backendInterface>({
+    queryKey: [ACTOR_QUERY_KEY, principalStr],
+    queryFn: async () => {
+      if (!identity) {
+        throw new Error("No identity available");
       }
 
       const actorOptions = {
@@ -30,10 +29,11 @@ export function useActor() {
       await actor._initializeAccessControlWithSecret(adminToken);
       return actor;
     },
-    // Only refetch when identity changes
+    // Only create the actor when we have a real authenticated identity.
+    // This prevents an anonymous actor from being cached and mistakenly
+    // returned by waitForActor before the real identity has loaded.
+    enabled: !!identity && !identity.getPrincipal().isAnonymous(),
     staleTime: Number.POSITIVE_INFINITY,
-    // This will cause the actor to be recreated when the identity changes
-    enabled: true,
   });
 
   // When the actor changes, invalidate dependent queries
