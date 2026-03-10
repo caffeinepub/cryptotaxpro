@@ -1,4 +1,3 @@
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
@@ -24,11 +23,21 @@ export function StatCard({
   if (isLoading) {
     return (
       <div
-        className={cn("rounded-lg border border-border bg-card p-4", className)}
+        className={cn(
+          "rounded-lg border border-border bg-card p-4 animate-pulse",
+          className,
+        )}
+        data-ocid="dashboard.loading_state"
       >
-        <Skeleton className="h-4 w-24 mb-3" />
-        <Skeleton className="h-7 w-32 mb-2" />
-        <Skeleton className="h-3 w-20" />
+        {/* Icon placeholder + label */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="h-3.5 w-24 rounded bg-muted" />
+          <div className="w-7 h-7 rounded-md bg-muted" />
+        </div>
+        {/* Value placeholder */}
+        <div className="h-8 w-28 rounded bg-muted mb-2" />
+        {/* SubValue placeholder */}
+        <div className="h-3 w-16 rounded bg-muted" />
       </div>
     );
   }

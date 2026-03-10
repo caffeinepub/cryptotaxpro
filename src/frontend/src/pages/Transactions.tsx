@@ -1258,27 +1258,55 @@ export function Transactions() {
                       (k) => (
                         <TableRow
                           key={`tx-skeleton-${k}`}
-                          className="border-border"
+                          className="border-border animate-pulse"
+                          data-ocid="transactions.loading_state"
                         >
-                          {(
-                            [
-                              "1",
-                              "2",
-                              "3",
-                              "4",
-                              "5",
-                              "6",
-                              "7",
-                              "8",
-                              "9",
-                              "10",
-                              "11",
-                            ] as const
-                          ).map((j) => (
-                            <TableCell key={`cell-${j}`}>
-                              <Skeleton className="h-4 w-full" />
-                            </TableCell>
-                          ))}
+                          {/* Checkbox */}
+                          <TableCell className="py-3 w-10">
+                            <div className="h-4 w-4 rounded bg-muted" />
+                          </TableCell>
+                          {/* Date */}
+                          <TableCell className="py-3">
+                            <div className="h-3 w-24 rounded bg-muted" />
+                          </TableCell>
+                          {/* Type badge */}
+                          <TableCell className="py-3">
+                            <div className="h-5 w-14 rounded-full bg-muted" />
+                          </TableCell>
+                          {/* Sent asset */}
+                          <TableCell className="py-3">
+                            <div className="h-3.5 w-20 rounded bg-muted" />
+                          </TableCell>
+                          {/* Received asset */}
+                          <TableCell className="py-3">
+                            <div className="h-3.5 w-16 rounded bg-muted" />
+                          </TableCell>
+                          {/* Fee */}
+                          <TableCell className="py-3">
+                            <div className="h-3 w-12 rounded bg-muted" />
+                          </TableCell>
+                          {/* Price */}
+                          <TableCell className="py-3">
+                            <div className="h-3 w-18 rounded bg-muted" />
+                          </TableCell>
+                          {/* Total */}
+                          <TableCell className="py-3">
+                            <div className="h-3.5 w-20 rounded bg-muted" />
+                          </TableCell>
+                          {/* Gain/Loss */}
+                          <TableCell className="py-3">
+                            <div className="h-3.5 w-16 rounded bg-muted" />
+                          </TableCell>
+                          {/* Exchange */}
+                          <TableCell className="py-3">
+                            <div className="h-3 w-14 rounded bg-muted" />
+                          </TableCell>
+                          {/* Status */}
+                          <TableCell className="py-3">
+                            <div className="h-5 w-16 rounded-full bg-muted" />
+                          </TableCell>
+                          {/* Actions */}
+                          <TableCell className="py-3 w-20" />
                         </TableRow>
                       ),
                     )

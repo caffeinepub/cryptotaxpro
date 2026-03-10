@@ -207,8 +207,18 @@ export function Dashboard() {
           </h2>
           <p className="text-xs text-muted-foreground mb-4">By current value</p>
           {portfolioLoading ? (
-            <div className="flex items-center justify-center h-52">
-              <Skeleton className="w-40 h-40 rounded-full" />
+            <div className="flex items-center justify-center h-52 animate-pulse">
+              <div className="relative w-40 h-40">
+                {/* Donut ring */}
+                <div className="w-40 h-40 rounded-full bg-muted" />
+                {/* Inner cutout */}
+                <div className="absolute inset-0 m-auto w-20 h-20 rounded-full bg-card" />
+                {/* Center label placeholder */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                  <div className="h-3 w-12 rounded bg-muted-foreground/20" />
+                  <div className="h-2 w-8 rounded bg-muted-foreground/15" />
+                </div>
+              </div>
             </div>
           ) : (
             <div data-ocid="dashboard.portfolio_chart">
@@ -300,24 +310,36 @@ export function Dashboard() {
               <TableBody>
                 {portfolioLoading
                   ? (["a", "b", "c", "d", "e"] as const).map((k) => (
-                      <TableRow key={`sk-${k}`} className="border-border">
-                        <TableCell>
-                          <Skeleton className="h-4 w-20" />
+                      <TableRow
+                        key={`sk-${k}`}
+                        className="border-border animate-pulse"
+                      >
+                        {/* Asset name + ticker */}
+                        <TableCell className="py-3">
+                          <div className="flex flex-col gap-1.5">
+                            <div className="h-3.5 w-16 rounded bg-muted" />
+                            <div className="h-2.5 w-24 rounded bg-muted/60" />
+                          </div>
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-16 ml-auto" />
+                        {/* Amount */}
+                        <TableCell className="py-3 text-right">
+                          <div className="h-3.5 w-14 rounded bg-muted ml-auto" />
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-20 ml-auto" />
+                        {/* Avg cost */}
+                        <TableCell className="py-3 text-right">
+                          <div className="h-3.5 w-16 rounded bg-muted ml-auto" />
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-20 ml-auto" />
+                        {/* Current price */}
+                        <TableCell className="py-3 text-right">
+                          <div className="h-3.5 w-16 rounded bg-muted ml-auto" />
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-20 ml-auto" />
+                        {/* Value */}
+                        <TableCell className="py-3 text-right">
+                          <div className="h-3.5 w-20 rounded bg-muted ml-auto" />
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-12 ml-auto" />
+                        {/* ROI badge */}
+                        <TableCell className="py-3 text-right">
+                          <div className="h-5 w-12 rounded-full bg-muted ml-auto" />
                         </TableCell>
                       </TableRow>
                     ))
@@ -431,24 +453,33 @@ export function Dashboard() {
             <TableBody>
               {txLoading
                 ? (["a", "b", "c", "d", "e"] as const).map((k) => (
-                    <TableRow key={`rtx-sk-${k}`} className="border-border">
-                      <TableCell>
-                        <Skeleton className="h-4 w-20" />
+                    <TableRow
+                      key={`rtx-sk-${k}`}
+                      className="border-border animate-pulse"
+                    >
+                      {/* Date */}
+                      <TableCell className="py-3">
+                        <div className="h-3 w-20 rounded bg-muted" />
                       </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-5 w-16" />
+                      {/* Type badge */}
+                      <TableCell className="py-3">
+                        <div className="h-5 w-14 rounded-full bg-muted" />
                       </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-12" />
+                      {/* Asset */}
+                      <TableCell className="py-3">
+                        <div className="h-3.5 w-10 rounded bg-muted" />
                       </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-20" />
+                      {/* Amount */}
+                      <TableCell className="py-3">
+                        <div className="h-3 w-20 rounded bg-muted" />
                       </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-20 ml-auto" />
+                      {/* Total */}
+                      <TableCell className="py-3 text-right">
+                        <div className="h-3.5 w-18 rounded bg-muted ml-auto" />
                       </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-20 ml-auto" />
+                      {/* Gain */}
+                      <TableCell className="py-3 text-right">
+                        <div className="h-3.5 w-16 rounded bg-muted ml-auto" />
                       </TableCell>
                       <TableCell />
                     </TableRow>
