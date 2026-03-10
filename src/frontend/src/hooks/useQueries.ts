@@ -20,7 +20,7 @@ import { useActor } from "./useActor";
 // ──────────────────────────────────────────────
 export async function waitForActor(
   queryClient: ReturnType<typeof useQueryClient>,
-  timeoutMs = 10000,
+  timeoutMs = 30000,
 ): Promise<backendInterface> {
   const deadline = Date.now() + timeoutMs;
 
@@ -43,14 +43,14 @@ export async function waitForActor(
 // Transactions
 // ──────────────────────────────────────────────
 export function useTransactions() {
-  const { actor, isFetching } = useActor();
+  const { actor } = useActor();
   return useQuery({
     queryKey: ["transactions"],
     queryFn: async () => {
       if (!actor) return [] as Transaction[];
       return await actor.getTransactions();
     },
-    enabled: !isFetching,
+    enabled: !!actor,
   });
 }
 
@@ -375,7 +375,7 @@ export function useHarvestCandidates(livePrices: Record<string, number> = {}): {
 // User Profile
 // ──────────────────────────────────────────────
 export function useUserProfile() {
-  const { actor, isFetching } = useActor();
+  const { actor } = useActor();
   return useQuery({
     queryKey: ["userProfile"],
     queryFn: async () => {
@@ -388,7 +388,7 @@ export function useUserProfile() {
       }
     },
     placeholderData: mockUserProfile,
-    enabled: !isFetching,
+    enabled: !!actor,
   });
 }
 
